@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 from core.auth import get_ws_url
-from core.client_experiment2 import DerivClient
+from disposables.client_experiment2 import DerivClient
 
 
 # ==================== TERMINAL COLORS ====================

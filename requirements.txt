@@ -1,0 +1,6 @@
+redis
+websockets
+dotenv
+fastapi
+uvicorn
+jinja2
