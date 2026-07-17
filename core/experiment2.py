@@ -557,11 +557,9 @@ class PersistentTradeManager:
                 return None, None
 
             try:
-                poll_start = time.time()
                 response = await client.send(
                     {"proposal_open_contract": 1, "contract_id": contract_id}
                 )
-                poll_time = (time.time() - poll_start) * 1000
                 poll_count += 1
                 consecutive_errors = 0
 
