@@ -33,11 +33,20 @@ class RedisManager:
 
     # ============ WORKER STATE ============
     async def save_worker_state(self, worker_id: str, state: Dict[str, Any]):
-        """Save worker state to Redis"""
         key = f"worker:{worker_id}:state"
+
         state["updated_at"] = datetime.now().isoformat()
-        await self.redis.hset(key, mapping=state)
-        await self.redis.expire(key, 86400 * 7)  # 7 days TTL
+
+        mapping = {}
+
+        for k, v in state.items():
+            if isinstance(v, (dict, list)):
+                mapping[k] = json.dumps(v)
+            else:
+                mapping[k] = v
+
+        await self.redis.hset(key, mapping=mapping)
+        await self.redis.expire(key, 86400 * 7)  # 7 days
 
     async def get_worker_state(self, worker_id: str) -> Optional[Dict]:
         """Get worker state from Redis"""

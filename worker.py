@@ -896,7 +896,7 @@ async def get_account_balance(client):
 
 
 # ==================== MAIN WORKER FUNCTION ====================
-async def run_worker(config):
+async def run_worker(config, logger=None):
     """
     Main worker function that accepts all parameters via config dict.
 
@@ -1158,6 +1158,6 @@ if __name__ == "__main__":
     }
 
     try:
-        asyncio.run(run_worker(config))
+        asyncio.run(run_worker(config, logger=None))
     except KeyboardInterrupt:
         print("\nBot manually terminated. Goodbye!")

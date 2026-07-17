@@ -1,4 +1,5 @@
 # main_api.py
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 import uuid
 from datetime import datetime
@@ -10,23 +11,7 @@ from redis_manager import redis_manager
 from ws_log_streaming import ws_manager, redis_log_listener
 from models import WorkerConfig, WorkerResponse
 
-app = FastAPI(title="Persistent Trading Bot API", version="1.0")
-
 # ==================== STARTUP/SHUTDOWN ====================
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup: Connect to Redis and start listener"""
-    await redis_manager.connect()
-
-    # Start Redis listener in background
-    asyncio.create_task(redis_log_listener())
-
-    # Restore workers from previous sessions
-    await restore_workers()
-
-    print(f"🚀 Server started with {len(workers)} workers restored")
 
 
 async def restore_workers():
@@ -47,16 +32,40 @@ async def restore_workers():
                 print(f"🔄 Restored worker {worker_id}")
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Shutdown: Stop all workers and disconnect Redis"""
-    # Stop all workers
-    for worker_id in list(workers.keys()):
-        await workers[worker_id].stop()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ---- Startup ----
+    await redis_manager.connect()
 
-    # Disconnect Redis
-    await redis_manager.disconnect()
-    print("🛑 Server shutdown complete")
+    # Start Redis listener in background
+    listener_task = asyncio.create_task(redis_log_listener())
+
+    # Restore workers from previous sessions
+    await restore_workers()
+
+    print(f"🚀 Server started with {len(workers)} workers restored")
+
+    try:
+        yield
+    finally:
+        # ---- Shutdown ----
+        # Stop all workers
+        for worker_id in list(workers.keys()):
+            await workers[worker_id].stop()
+
+        # Cancel the Redis listener task
+        listener_task.cancel()
+        try:
+            await listener_task
+        except asyncio.CancelledError:
+            pass
+
+        # Disconnect Redis
+        await redis_manager.disconnect()
+        print("🛑 Server shutdown complete")
+
+
+app = FastAPI(title="Persistent Trading Bot API", version="1.0", lifespan=lifespan)
 
 
 # ==================== WORKER MANAGEMENT ====================
@@ -72,7 +81,7 @@ async def start_worker(config: WorkerConfig):
         raise HTTPException(400, "Worker already exists")
 
     # Create and start worker
-    worker = PersistentWorker(worker_id, config.dict())
+    worker = PersistentWorker(worker_id, config.model_dump())
     workers[worker_id] = worker
 
     await worker.start()
