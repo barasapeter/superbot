@@ -120,6 +120,9 @@ async def restart_worker(worker_id: str):
 
     # Get config and start again
     worker_state = await redis_manager.get_worker_state(worker_id)
+    if "config" in worker_state:
+        worker_state["config"] = json.loads(worker_state["config"])
+
     if not worker_state or "config" not in worker_state:
         raise HTTPException(400, "Worker config not found")
 
@@ -141,6 +144,9 @@ async def list_workers():
     result = []
     for worker_id, worker in workers.items():
         state = await redis_manager.get_worker_state(worker_id)
+        if "config" in state:
+            state["config"] = json.loads(state["config"])
+
         result.append(
             {
                 "worker_id": worker_id,
@@ -159,6 +165,8 @@ async def get_worker_status(worker_id: str):
         raise HTTPException(404, f"Worker {worker_id} not found")
 
     state = await redis_manager.get_worker_state(worker_id)
+    if "config" in state:
+        state["config"] = json.loads(state["config"])
     return {
         "worker_id": worker_id,
         "is_running": workers[worker_id].is_running,
@@ -224,6 +232,8 @@ async def websocket_logs(websocket: WebSocket, worker_id: str):
 
         # Send current status
         state = await redis_manager.get_worker_state(worker_id)
+        if "config" in state:
+            state["config"] = json.loads(state["config"])
         await websocket.send_json(
             {"type": "status", "worker_id": worker_id, "data": state}
         )
@@ -237,6 +247,8 @@ async def websocket_logs(websocket: WebSocket, worker_id: str):
                     await websocket.send_text("pong")
                 elif data == "get_status":
                     state = await redis_manager.get_worker_state(worker_id)
+                    if "config" in state:
+                        state["config"] = json.loads(state["config"])
                     await websocket.send_json(
                         {"type": "status", "worker_id": worker_id, "data": state}
                     )
