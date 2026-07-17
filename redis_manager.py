@@ -98,7 +98,7 @@ class RedisManager:
                     if log_time < since:
                         continue
                 parsed_logs.append(entry)
-            except:
+            except Exception:
                 continue
 
         return parsed_logs
