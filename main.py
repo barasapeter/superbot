@@ -1,7 +1,7 @@
 import redis
 
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
-
+# r.flushall()
 for key in r.keys("*"):
     key_type = r.type(key)
 

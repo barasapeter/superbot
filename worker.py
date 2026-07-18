@@ -1,4 +1,7 @@
-"""Fixed Martingale Pre-Fetch with Dual Connections & WebSocket Recovery - Worker Version"""
+"""
+Fixed Martingale Pre-Fetch with Dual Connections & WebSocket Recovery - Worker Version
+Enhanced with Consistent Event Storage Schema
+"""
 
 import asyncio
 import os
@@ -7,42 +10,425 @@ import sys
 import time
 import json
 from datetime import datetime
+from typing import Dict, Any, Optional
+from enum import Enum
+from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
 from core.auth import get_ws_url
 from disposables.client_experiment2 import DerivClient
-from typing import Dict, Any
 from redis_manager import redis_manager
 
-# worker.py - Add event storage function
+# ==================== EVENT STORAGE SCHEMA ====================
 
 
-async def store_event(
-    worker_id: str, event_type: str, event_data: Dict[str, Any], logger=None
-):
-    """Store event in Redis and log it"""
-    try:
-        from redis_manager import redis_manager
+class EventLevel(Enum):
+    """Event severity levels"""
 
-        event = await redis_manager.store_event(worker_id, event_type, event_data)
-        if logger:
-            logger.info(
-                f"📝 Event stored: {event_type} - {event_data.get('message', '')}"
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+    SUCCESS = "success"
+    TRADE = "trade"
+
+
+class EventCategory(Enum):
+    """Event categories for better organization"""
+
+    SYSTEM = "system"
+    CONFIGURATION = "configuration"
+    CONNECTION = "connection"
+    TRADE = "trade"
+    MARKET = "market"
+    MARTINGALE = "martingale"
+    STATISTICS = "statistics"
+    ERROR = "error"
+    PERFORMANCE = "performance"
+
+
+@dataclass
+class BaseEvent:
+    """Base event structure"""
+
+    worker_id: str
+    event_type: str
+    category: str
+    level: str
+    timestamp: str
+    message: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class DetailedEvent(BaseEvent):
+    """Detailed event with additional context"""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    duration_ms: Optional[float] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class TradeEvent(DetailedEvent):
+    """Specialized trade event"""
+
+    trade_id: Optional[str] = None
+    symbol: Optional[str] = None
+    signal: Optional[str] = None
+    stake: Optional[float] = None
+    entry_price: Optional[float] = None
+    exit_price: Optional[float] = None
+    profit: Optional[float] = None
+    result: Optional[str] = None
+    balance_after: Optional[float] = None
+
+
+@dataclass
+class MarketEvent(DetailedEvent):
+    """Market data event"""
+
+    symbol: Optional[str] = None
+    price: Optional[float] = None
+    streak: Optional[int] = None
+    latency_ms: Optional[float] = None
+    tick_interval_ms: Optional[float] = None
+
+
+@dataclass
+class SystemEvent(DetailedEvent):
+    """System/performance event"""
+
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+    uptime_seconds: Optional[float] = None
+    active_connections: Optional[int] = None
+
+
+# ==================== EVENT STORAGE MANAGER ====================
+
+
+class EventStorageManager:
+    """Manages event storage with consistent schema"""
+
+    def __init__(self, worker_id: str, logger: Optional[logging.Logger] = None):
+        self.worker_id = worker_id
+        self.logger = logger
+        self.event_count = 0
+        self.start_time = datetime.now()
+        self._event_queue = asyncio.Queue()
+        self._is_processing = False
+        self._storage_task = None
+
+    async def start(self):
+        """Start background event processing"""
+        if not self._is_processing:
+            self._is_processing = True
+            self._storage_task = asyncio.create_task(self._process_events())
+
+    async def stop(self):
+        """Stop background event processing"""
+        self._is_processing = False
+        if self._storage_task:
+            self._storage_task.cancel()
+            try:
+                await self._storage_task
+            except Exception:
+                pass
+
+    async def _process_events(self):
+        """Process events from queue"""
+        while self._is_processing:
+            try:
+                event = await self._event_queue.get()
+                await self._store_event(event)
+                self._event_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"Event processing error: {e}")
+
+    async def _store_event(self, event: BaseEvent):
+        """Store event in Redis"""
+        try:
+            # Convert event to dict
+            event_dict = event.to_dict()
+
+            # Add metadata
+            event_dict["_id"] = (
+                f"{self.worker_id}_{self.event_count}_{int(time.time())}"
             )
+            event_dict["_processed_at"] = datetime.now().isoformat()
+            event_dict["_event_index"] = self.event_count
+
+            self.event_count += 1
+
+            # Store in Redis
+            await redis_manager.store_event(
+                self.worker_id, event.event_type, event_dict
+            )
+
+            if self.logger and event.level != EventLevel.DEBUG.value:
+                log_level = getattr(logging, event.level.upper(), logging.INFO)
+                self.logger.log(log_level, f"📝 {event.event_type}: {event.message}")
+
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Failed to store event: {e}")
+
+    async def store_event(self, event: BaseEvent):
+        """Queue event for storage"""
+        await self._event_queue.put(event)
+
+    # ============ FACTORY METHODS ============
+
+    async def system_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        data: Optional[Dict] = None,
+        **kwargs,
+    ):
+        """Create and store a system event"""
+        event = SystemEvent(
+            worker_id=self.worker_id,
+            event_type=f"system_{event_type}",
+            category=EventCategory.SYSTEM.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            data=data,
+            **kwargs,
+        )
+        await self.store_event(event)
         return event
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to store event: {e}")
-        return None
+
+    async def config_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        data: Optional[Dict] = None,
+    ):
+        """Create and store a configuration event"""
+        event = DetailedEvent(
+            worker_id=self.worker_id,
+            event_type=f"config_{event_type}",
+            category=EventCategory.CONFIGURATION.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            data=data,
+        )
+        await self.store_event(event)
+        return event
+
+    async def connection_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        data: Optional[Dict] = None,
+        duration_ms: Optional[float] = None,
+    ):
+        """Create and store a connection event"""
+        event = DetailedEvent(
+            worker_id=self.worker_id,
+            event_type=f"connection_{event_type}",
+            category=EventCategory.CONNECTION.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            data=data,
+            duration_ms=duration_ms,
+        )
+        await self.store_event(event)
+        return event
+
+    async def trade_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        trade_id: Optional[str] = None,
+        symbol: Optional[str] = None,
+        signal: Optional[str] = None,
+        stake: Optional[float] = None,
+        entry_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+        profit: Optional[float] = None,
+        result: Optional[str] = None,
+        balance_after: Optional[float] = None,
+        data: Optional[Dict] = None,
+    ):
+        """Create and store a trade event"""
+        event = TradeEvent(
+            worker_id=self.worker_id,
+            event_type=f"trade_{event_type}",
+            category=EventCategory.TRADE.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            trade_id=trade_id,
+            symbol=symbol,
+            signal=signal,
+            stake=stake,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            profit=profit,
+            result=result,
+            balance_after=balance_after,
+            data=data,
+        )
+        await self.store_event(event)
+        return event
+
+    async def market_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        symbol: Optional[str] = None,
+        price: Optional[float] = None,
+        streak: Optional[int] = None,
+        latency_ms: Optional[float] = None,
+        tick_interval_ms: Optional[float] = None,
+        data: Optional[Dict] = None,
+    ):
+        """Create and store a market event"""
+        event = MarketEvent(
+            worker_id=self.worker_id,
+            event_type=f"market_{event_type}",
+            category=EventCategory.MARKET.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            symbol=symbol,
+            price=price,
+            streak=streak,
+            latency_ms=latency_ms,
+            tick_interval_ms=tick_interval_ms,
+            data=data,
+        )
+        await self.store_event(event)
+        return event
+
+    async def martingale_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        data: Optional[Dict] = None,
+    ):
+        """Create and store a martingale event"""
+        event = DetailedEvent(
+            worker_id=self.worker_id,
+            event_type=f"martingale_{event_type}",
+            category=EventCategory.MARTINGALE.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            data=data,
+        )
+        await self.store_event(event)
+        return event
+
+    async def stats_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        data: Optional[Dict] = None,
+    ):
+        """Create and store a statistics event"""
+        event = DetailedEvent(
+            worker_id=self.worker_id,
+            event_type=f"stats_{event_type}",
+            category=EventCategory.STATISTICS.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            data=data,
+        )
+        await self.store_event(event)
+        return event
+
+    async def error_event(
+        self,
+        event_type: str,
+        level: EventLevel,
+        message: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        error: Optional[str] = None,
+        traceback: Optional[str] = None,
+        data: Optional[Dict] = None,
+    ):
+        """Create and store an error event"""
+        error_data = data or {}
+        if error:
+            error_data["error"] = error
+        if traceback:
+            error_data["traceback"] = traceback
+
+        event = DetailedEvent(
+            worker_id=self.worker_id,
+            event_type=f"error_{event_type}",
+            category=EventCategory.ERROR.value,
+            level=level.value,
+            timestamp=datetime.now().isoformat(),
+            message=message,
+            title=title,
+            description=description,
+            data=error_data,
+        )
+        await self.store_event(event)
+        return event
 
 
 # ==================== TERMINAL COLORS ====================
+
+
 class C:
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
     ITALIC = "\033[3m"
     UNDERLINE = "\033[4m"
-
     GREEN = "\033[38;5;46m"
     RED = "\033[38;5;196m"
     YELLOW = "\033[38;5;220m"
@@ -85,8 +471,9 @@ ColorFormatter.LEVEL_COLORS = {
     logging.CRITICAL: C.RED + C.BOLD,
 }
 
-
 # ==================== SESSION P&L TRACKER ====================
+
+
 class SessionStats:
     def __init__(self, initial_balance=15.0, currency="USD"):
         self.initial_balance = initial_balance
@@ -102,6 +489,10 @@ class SessionStats:
         self.max_consecutive_losses = 0
         self.max_drawdown = 0.0
         self.peak_balance = initial_balance
+        self.event_manager = None
+
+    def set_event_manager(self, event_manager):
+        self.event_manager = event_manager
 
     def get_current_balance(self):
         return self.initial_balance + self.net_pl
@@ -131,19 +522,40 @@ class SessionStats:
         if drawdown > self.max_drawdown:
             self.max_drawdown = drawdown
 
-        self.trade_history.append(
-            {
-                "time": datetime.now().isoformat(),
-                "contract_id": contract_id,
-                "signal": signal,
-                "stake": stake,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "profit": profit,
-                "result": "WON" if profit > 0 else "LOST",
-                "balance": current_balance,
-            }
-        )
+        trade_record = {
+            "time": datetime.now().isoformat(),
+            "contract_id": contract_id,
+            "signal": signal,
+            "stake": stake,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "profit": profit,
+            "result": "WON" if profit > 0 else "LOST",
+            "balance": current_balance,
+        }
+        self.trade_history.append(trade_record)
+
+        # Store trade event
+        if self.event_manager:
+            asyncio.create_task(
+                self.event_manager.trade_event(
+                    "recorded",
+                    EventLevel.TRADE,
+                    f"Trade {contract_id} {trade_record['result']}",
+                    title=f"Trade {trade_record['result']}",
+                    description=f"{signal} trade {trade_record['result']} with profit {profit:.2f}",
+                    trade_id=str(contract_id),
+                    symbol="R_100",
+                    signal=signal,
+                    stake=stake,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    profit=profit,
+                    result=trade_record["result"],
+                    balance_after=current_balance,
+                    data={"trade_number": self.trades},
+                )
+            )
 
     def summary_line(self):
         win_rate = (self.wins / self.trades * 100) if self.trades else 0.0
@@ -202,6 +614,8 @@ class SessionStats:
 
 
 # ==================== MARTINGALE MANAGER ====================
+
+
 class MartingaleManager:
     def __init__(
         self, base_stake, multiplier=2.0, enabled=True, max_steps=6, max_stake=5000
@@ -219,9 +633,13 @@ class MartingaleManager:
         self._is_prefetched = False
         self._stopped = False
         self.logger = None
+        self.event_manager = None
 
     def set_logger(self, logger):
         self.logger = logger
+
+    def set_event_manager(self, event_manager):
+        self.event_manager = event_manager
 
     async def get_current_stake(self):
         async with self._lock:
@@ -257,6 +675,16 @@ class MartingaleManager:
                 if self.logger:
                     stop_warning = f"{C.RED}🛑 Martingale stopped after {self.max_steps} steps!{C.RESET}"
                     self.logger.warning(stop_warning)
+
+                if self.event_manager:
+                    await self.event_manager.martingale_event(
+                        "stopped",
+                        EventLevel.WARNING,
+                        f"Martingale stopped after {self.max_steps} steps",
+                        title="Martingale Stopped",
+                        description=f"Reached maximum steps ({self.max_steps})",
+                        data={"max_steps": self.max_steps, "current_step": self.step},
+                    )
                 return
 
             next_stake = round(self.current_stake * self.multiplier, 2)
@@ -265,6 +693,7 @@ class MartingaleManager:
                     cap_warning = f"{C.YELLOW}Martingale stake of {next_stake} exceeds maximum. Capping new stake at {self.max_stake} {currency}{C.RESET}"
                     self.logger.warning(cap_warning)
                 next_stake = self.max_stake
+
             self.current_stake = next_stake
             self._pending_stake = next_stake
             self._is_prefetched = True
@@ -279,6 +708,23 @@ class MartingaleManager:
                     f"{C.GREY}(loss streak: {self.loss_streak}, {remaining} steps remaining){C.RESET}"
                 )
 
+            if self.event_manager:
+                await self.event_manager.martingale_event(
+                    "prefetched",
+                    EventLevel.INFO,
+                    f"Martingale step {self.step} prefetched: {next_stake} {currency}",
+                    title="Martingale Prefetched",
+                    description=f"Step {self.step}/{self.max_steps}",
+                    data={
+                        "step": self.step,
+                        "max_steps": self.max_steps,
+                        "stake": next_stake,
+                        "currency": currency,
+                        "loss_streak": self.loss_streak,
+                        "remaining_steps": remaining,
+                    },
+                )
+
     async def record_result_async(self, won, currency="USD"):
         if not self.enabled:
             return
@@ -290,6 +736,20 @@ class MartingaleManager:
                         self.logger.info(
                             f"{C.GREEN}🔁 Martingale reset{C.RESET} — win recovered the drawdown, "
                             f"back to base stake ({C.BOLD}{self.base_stake} {currency}{C.RESET})."
+                        )
+                    if self.event_manager:
+                        await self.event_manager.martingale_event(
+                            "reset",
+                            EventLevel.SUCCESS,
+                            f"Martingale reset to base stake: {self.base_stake} {currency}",
+                            title="Martingale Reset",
+                            description="Win recovered drawdown",
+                            data={
+                                "base_stake": self.base_stake,
+                                "currency": currency,
+                                "previous_step": self.step,
+                                "loss_streak": self.loss_streak,
+                            },
                         )
                 self.current_stake = self.base_stake
                 self.step = 0
@@ -308,6 +768,15 @@ class MartingaleManager:
                     self.logger.warning(
                         f"{C.RED}🛑 Martingale reached max steps ({self.max_steps})!{C.RESET}"
                     )
+                if self.event_manager:
+                    await self.event_manager.martingale_event(
+                        "max_steps_reached",
+                        EventLevel.WARNING,
+                        f"Martingale reached max steps ({self.max_steps})",
+                        title="Max Steps Reached",
+                        description="No more trades allowed",
+                        data={"max_steps": self.max_steps, "step": self.step},
+                    )
 
     def status_tag(self):
         if not self.enabled:
@@ -322,6 +791,8 @@ class MartingaleManager:
 
 
 # ==================== PERSISTENT TRADE MANAGER ====================
+
+
 class PersistentTradeManager:
     def __init__(self, config, logger, stats, martingale):
         self.config = config
@@ -339,6 +810,10 @@ class PersistentTradeManager:
         self._trade_lock = asyncio.Lock()
         self._pending_contracts = {}
         self._heartbeat_failures = 0
+        self.event_manager = None
+
+    def set_event_manager(self, event_manager):
+        self.event_manager = event_manager
 
     async def _create_client(self, label="client"):
         try:
@@ -349,9 +824,29 @@ class PersistentTradeManager:
             )
             client = DerivClient(ws_url)
             await client.connect()
+
+            if self.event_manager:
+                await self.event_manager.connection_event(
+                    "created",
+                    EventLevel.SUCCESS,
+                    f"{label} client created",
+                    title=f"{label} Client Created",
+                    description=f"Successfully created {label} client",
+                    data={"label": label},
+                )
             return client
         except Exception as e:
             self.logger.error(f"{C.RED}❌ Failed to create {label}: {e}{C.RESET}")
+            if self.event_manager:
+                await self.event_manager.error_event(
+                    "client_creation",
+                    EventLevel.ERROR,
+                    f"Failed to create {label} client",
+                    title="Client Creation Failed",
+                    description=str(e),
+                    error=str(e),
+                    data={"label": label},
+                )
             return None
 
     async def ensure_execution_client(self):
@@ -366,6 +861,15 @@ class PersistentTradeManager:
                 if self.execution_client:
                     self.logger.info(f"{C.GREEN}✅ Execution client ready.{C.RESET}")
                     self.reconnect_attempts = 0
+
+                    if self.event_manager:
+                        await self.event_manager.connection_event(
+                            "execution_ready",
+                            EventLevel.SUCCESS,
+                            "Execution client ready",
+                            title="Execution Client Ready",
+                            description="Connected and ready for trading",
+                        )
             except Exception as e:
                 self.logger.error(f"{C.RED}❌ Execution client failed: {e}{C.RESET}")
                 self.reconnect_attempts += 1
@@ -375,6 +879,15 @@ class PersistentTradeManager:
                     self.logger.error(
                         f"{C.RED}❌ Max reconnect attempts reached.{C.RESET}"
                     )
+                    if self.event_manager:
+                        await self.event_manager.error_event(
+                            "max_reconnect_exceeded",
+                            EventLevel.CRITICAL,
+                            "Max reconnect attempts exceeded for execution client",
+                            title="Max Reconnect Exceeded",
+                            description="Cannot reconnect to execution client",
+                            data={"attempts": self.reconnect_attempts},
+                        )
                     return None
                 return None
 
@@ -392,6 +905,15 @@ class PersistentTradeManager:
                 if self.polling_client:
                     self.logger.info(f"{C.GREEN}✅ Polling client ready.{C.RESET}")
                     self.reconnect_attempts = 0
+
+                    if self.event_manager:
+                        await self.event_manager.connection_event(
+                            "polling_ready",
+                            EventLevel.SUCCESS,
+                            "Polling client ready",
+                            title="Polling Client Ready",
+                            description="Connected and ready for polling",
+                        )
             except Exception as e:
                 self.logger.error(f"{C.RED}❌ Polling client failed: {e}{C.RESET}")
                 self.reconnect_attempts += 1
@@ -401,6 +923,15 @@ class PersistentTradeManager:
                     self.logger.error(
                         f"{C.RED}❌ Max reconnect attempts reached.{C.RESET}"
                     )
+                    if self.event_manager:
+                        await self.event_manager.error_event(
+                            "max_reconnect_exceeded",
+                            EventLevel.CRITICAL,
+                            "Max reconnect attempts exceeded for polling client",
+                            title="Max Reconnect Exceeded",
+                            description="Cannot reconnect to polling client",
+                            data={"attempts": self.reconnect_attempts},
+                        )
                     return None
                 return None
 
@@ -409,12 +940,14 @@ class PersistentTradeManager:
     async def heartbeat(self):
         consecutive_failures = 0
         max_consecutive_failures = 3
+        heartbeat_count = 0
 
         while not self._is_closing:
             await asyncio.sleep(self.config.get("heartbeat_interval", 5))
             if self._is_closing:
                 break
 
+            heartbeat_count += 1
             try:
                 exec_ok = True
                 if self.execution_client and self.execution_client.ws:
@@ -440,6 +973,15 @@ class PersistentTradeManager:
                     consecutive_failures = 0
                     self._heartbeat_failures = 0
 
+                    # Store heartbeat success periodically
+                    if heartbeat_count % 10 == 0 and self.event_manager:
+                        await self.event_manager.system_event(
+                            "heartbeat",
+                            EventLevel.DEBUG,
+                            f"Heartbeat {heartbeat_count} successful",
+                            data={"heartbeat_count": heartbeat_count},
+                        )
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -453,6 +995,15 @@ class PersistentTradeManager:
                     self.logger.warning(
                         f"{C.YELLOW}🔄 Multiple heartbeat failures, forcing reconnect...{C.RESET}"
                     )
+                    if self.event_manager:
+                        await self.event_manager.error_event(
+                            "heartbeat_failure",
+                            EventLevel.WARNING,
+                            f"Multiple heartbeat failures ({consecutive_failures})",
+                            title="Heartbeat Failure",
+                            description="Forcing reconnection",
+                            data={"failures": consecutive_failures},
+                        )
                     self.execution_client = None
                     self.polling_client = None
                     await self.ensure_execution_client()
@@ -483,9 +1034,18 @@ class PersistentTradeManager:
             proposal_time = (time.time() - proposal_start) * 1000
 
             if "error" in proposal_res:
-                self.logger.error(
-                    f"{C.RED}❌ Proposal failed: {proposal_res['error'].get('message')}{C.RESET}"
-                )
+                error_msg = proposal_res["error"].get("message", "Unknown error")
+                self.logger.error(f"{C.RED}❌ Proposal failed: {error_msg}{C.RESET}")
+                if self.event_manager:
+                    await self.event_manager.error_event(
+                        "proposal_failed",
+                        EventLevel.ERROR,
+                        f"Proposal failed: {error_msg}",
+                        title="Proposal Failed",
+                        description=f"Failed to get proposal for {signal}",
+                        error=error_msg,
+                        data={"signal": signal, "stake": stake, "symbol": symbol},
+                    )
                 return None, None
 
             proposal_data = proposal_res.get("proposal", {})
@@ -508,9 +1068,22 @@ class PersistentTradeManager:
             buy_time = (time.time() - buy_start) * 1000
 
             if "error" in buy_res:
-                self.logger.error(
-                    f"{C.RED}❌ Purchase failed: {buy_res['error'].get('message')}{C.RESET}"
-                )
+                error_msg = buy_res["error"].get("message", "Unknown error")
+                self.logger.error(f"{C.RED}❌ Purchase failed: {error_msg}{C.RESET}")
+                if self.event_manager:
+                    await self.event_manager.error_event(
+                        "purchase_failed",
+                        EventLevel.ERROR,
+                        f"Purchase failed: {error_msg}",
+                        title="Purchase Failed",
+                        description=f"Failed to buy contract for {signal}",
+                        error=error_msg,
+                        data={
+                            "signal": signal,
+                            "stake": stake,
+                            "proposal_id": proposal_id,
+                        },
+                    )
                 return None, None
 
             contract_id = buy_res.get("buy", {}).get("contract_id")
@@ -522,16 +1095,54 @@ class PersistentTradeManager:
                 f"{C.GREY}| Latency: Proposal {proposal_time:.0f}ms + Buy {buy_time:.0f}ms = {total_time:.0f}ms{C.RESET}"
             )
 
+            if self.event_manager:
+                await self.event_manager.trade_event(
+                    "executed",
+                    EventLevel.TRADE,
+                    f"Trade executed: {contract_id}",
+                    title="Trade Executed",
+                    description=f"{signal} trade executed at {entry_price:.3f}",
+                    trade_id=str(contract_id),
+                    symbol=symbol,
+                    signal=signal,
+                    stake=stake,
+                    entry_price=entry_price,
+                    data={
+                        "proposal_time_ms": proposal_time,
+                        "buy_time_ms": buy_time,
+                        "total_time_ms": total_time,
+                    },
+                )
+
             return contract_id, entry_price
 
         except asyncio.TimeoutError:
             self.logger.error(
                 f"{C.RED}❌ Trade execution timeout - connection may be dead.{C.RESET}"
             )
+            if self.event_manager:
+                await self.event_manager.error_event(
+                    "execution_timeout",
+                    EventLevel.ERROR,
+                    "Trade execution timeout",
+                    title="Execution Timeout",
+                    description="Connection may be dead",
+                    data={"signal": signal, "stake": stake},
+                )
             self.execution_client = None
             return None, None
         except Exception as e:
             self.logger.error(f"{C.RED}❌ Trade execution error: {e}{C.RESET}")
+            if self.event_manager:
+                await self.event_manager.error_event(
+                    "execution_error",
+                    EventLevel.ERROR,
+                    f"Trade execution error: {str(e)}",
+                    title="Execution Error",
+                    description=str(e),
+                    error=str(e),
+                    data={"signal": signal, "stake": stake},
+                )
             self.execution_client = None
             return None, None
 
@@ -585,6 +1196,21 @@ class PersistentTradeManager:
                         f"Exit: {C.WHITE}{exit_price:.3f}{C.RESET} {C.GREY}|{C.RESET} "
                         f"Profit: {C.pl(profit)} {self.config.get('currency', 'USD')} {C.GREY}(polls: {poll_count}){C.RESET}"
                     )
+
+                    if self.event_manager:
+                        await self.event_manager.trade_event(
+                            "resolved",
+                            EventLevel.TRADE if profit > 0 else EventLevel.WARNING,
+                            f"Contract {contract_id} resolved: {status}",
+                            title=f"Trade {status}",
+                            description=f"Contract {contract_id} {status} with profit {profit:.2f}",
+                            trade_id=str(contract_id),
+                            exit_price=exit_price,
+                            profit=profit,
+                            result=status,
+                            data={"poll_count": poll_count},
+                        )
+
                     return profit, exit_price
 
             except asyncio.TimeoutError:
@@ -596,6 +1222,15 @@ class PersistentTradeManager:
                     self.logger.warning(
                         f"{C.YELLOW}🔄 Reconnecting polling client...{C.RESET}"
                     )
+                    if self.event_manager:
+                        await self.event_manager.connection_event(
+                            "polling_reconnect",
+                            EventLevel.WARNING,
+                            "Reconnecting polling client",
+                            title="Polling Reconnect",
+                            description="Reconnecting due to timeout errors",
+                            data={"consecutive_errors": consecutive_errors},
+                        )
                     self.polling_client = None
                     client = await self.ensure_polling_client()
                     if client is None:
@@ -620,6 +1255,16 @@ class PersistentTradeManager:
                     self.logger.warning(
                         f"{C.YELLOW}🔄 Reconnecting polling client...{C.RESET}"
                     )
+                    if self.event_manager:
+                        await self.event_manager.error_event(
+                            "polling_error",
+                            EventLevel.WARNING,
+                            f"Polling error: {error_msg}",
+                            title="Polling Error",
+                            description="Reconnecting",
+                            error=error_msg,
+                            data={"consecutive_errors": consecutive_errors},
+                        )
                     self.polling_client = None
                     client = await self.ensure_polling_client()
                     if client is None:
@@ -635,6 +1280,19 @@ class PersistentTradeManager:
         self.logger.warning(
             f"{C.YELLOW}⏱️ Contract {contract_id} timed out after {self.config.get('poll_timeout', 25)} seconds ({poll_count} polls).{C.RESET}"
         )
+        if self.event_manager:
+            await self.event_manager.error_event(
+                "poll_timeout",
+                EventLevel.WARNING,
+                f"Contract {contract_id} timed out after {self.config.get('poll_timeout', 25)}s",
+                title="Poll Timeout",
+                description="Could not resolve contract within timeout",
+                data={
+                    "contract_id": str(contract_id),
+                    "timeout": self.config.get("poll_timeout", 25),
+                    "poll_count": poll_count,
+                },
+            )
         return None, None
 
     async def process_trade(self, signal, symbol, currency):
@@ -662,6 +1320,18 @@ class PersistentTradeManager:
             self.logger.warning(
                 f"{C.RED}🛑 Stop loss triggered! Drawdown: {drawdown:.1f}% > {self.config.get('stop_loss_percent', 100)}%{C.RESET}"
             )
+            if self.event_manager:
+                await self.event_manager.system_event(
+                    "stop_loss_triggered",
+                    EventLevel.WARNING,
+                    f"Stop loss triggered: {drawdown:.1f}% drawdown",
+                    title="Stop Loss Triggered",
+                    description="Trading halted due to drawdown",
+                    data={
+                        "drawdown_percent": drawdown,
+                        "stop_loss_percent": self.config.get("stop_loss_percent", 100),
+                    },
+                )
             return
 
         stake = await self.martingale.next_stake_async()
@@ -715,10 +1385,41 @@ class PersistentTradeManager:
             self.logger.info(self.stats.summary_line())
 
             await self.martingale.record_result_async(won=profit > 0, currency=currency)
+
+            # Store statistics update
+            if self.event_manager:
+                await self.event_manager.stats_event(
+                    "updated",
+                    EventLevel.INFO,
+                    f"Stats updated: {self.stats.trades} trades",
+                    title="Statistics Updated",
+                    description=f"Trade {contract_id} completed",
+                    data={
+                        "total_trades": self.stats.trades,
+                        "wins": self.stats.wins,
+                        "losses": self.stats.losses,
+                        "win_rate": (
+                            (self.stats.wins / self.stats.trades * 100)
+                            if self.stats.trades
+                            else 0
+                        ),
+                        "net_pl": self.stats.net_pl,
+                        "current_balance": self.stats.get_current_balance(),
+                    },
+                )
         else:
             self.logger.error(
                 f"{C.RED}❌ Could not determine outcome for contract {contract_id}{C.RESET}"
             )
+            if self.event_manager:
+                await self.event_manager.error_event(
+                    "unresolved_contract",
+                    EventLevel.ERROR,
+                    f"Could not determine outcome for contract {contract_id}",
+                    title="Unresolved Contract",
+                    description="Contract outcome could not be determined",
+                    data={"contract_id": str(contract_id)},
+                )
             await self.martingale.record_result_async(won=False, currency=currency)
             async with self.martingale._lock:
                 self.martingale.current_stake = self.martingale.base_stake
@@ -745,6 +1446,15 @@ class PersistentTradeManager:
                 break
             except Exception as e:
                 self.logger.error(f"{C.RED}❌ Trade worker error: {e}{C.RESET}")
+                if self.event_manager:
+                    await self.event_manager.error_event(
+                        "trade_worker_error",
+                        EventLevel.ERROR,
+                        f"Trade worker error: {str(e)}",
+                        title="Trade Worker Error",
+                        description=str(e),
+                        error=str(e),
+                    )
                 import traceback
 
                 traceback.print_exc()
@@ -787,6 +1497,8 @@ class PersistentTradeManager:
 
 
 # ==================== TICK STREAK TRACKER ====================
+
+
 class TickStreakTracker:
     def __init__(
         self,
@@ -805,9 +1517,13 @@ class TickStreakTracker:
         self.signal_cooldown = signal_cooldown
         self.logger = None
         self.worker_id = worker_id
+        self.event_manager = None
 
     def set_logger(self, logger):
         self.logger = logger
+
+    def set_event_manager(self, event_manager):
+        self.event_manager = event_manager
 
     async def process_new_tick(
         self, price, server_epoch, martingale, stats, currency="USD"
@@ -822,14 +1538,14 @@ class TickStreakTracker:
                     f"🚨 {C.YELLOW}SYSTEM CLOCK OUT OF SYNC{C.RESET}: Your local time differs from the "
                     f"server by {C.BOLD}{latency/1000:.1f}s{C.RESET}."
                 )
-                await redis_manager.store_event(
-                    worker_id=self.worker_id,
-                    event_type="system_clock_out_of_sync",
-                    event_data={
-                        "type": "logline",
-                        "level": "error",
-                        "desc": f"SYSTEM CLOCK OUT OF SYNC. System time differs from the server by {latency/1000:.1f}s",
-                    },
+            if self.event_manager:
+                await self.event_manager.system_event(
+                    "clock_out_of_sync",
+                    EventLevel.WARNING,
+                    f"System clock out of sync: {latency/1000:.1f}s difference",
+                    title="Clock Out of Sync",
+                    description="Local time differs significantly from server time",
+                    data={"latency_ms": latency, "latency_seconds": latency / 1000},
                 )
             self.clock_drift_warning_triggered = True
 
@@ -838,14 +1554,16 @@ class TickStreakTracker:
                 self.logger.warning(
                     f"{C.YELLOW}⚠️ Skipping tick ({C.ORANGE}High Latency: {latency}ms{C.RESET})"
                 )
-                await redis_manager.store_event(
-                    worker_id=self.worker_id,
-                    event_type="skipping_tick",
-                    event_data={
-                        "type": "logline",
-                        "level": "neutral",
-                        "desc": f"Skipping tick (High Latency: {latency}ms)",
-                    },
+            if self.event_manager and latency > self.max_latency * 2:
+                await self.event_manager.market_event(
+                    "high_latency",
+                    EventLevel.WARNING,
+                    f"High latency tick skipped: {latency}ms",
+                    title="High Latency",
+                    description=f"Tick skipped due to latency {latency}ms",
+                    price=price,
+                    latency_ms=latency,
+                    data={"max_latency_ms": self.max_latency},
                 )
             return "SKIP_LATENCY"
 
@@ -885,7 +1603,7 @@ class TickStreakTracker:
         if martingale._pending_stake is not None:
             stake = martingale._pending_stake
 
-        # Live tick analysis output - this is the key status display
+        # Live tick analysis output
         if self.logger:
             self.logger.info(
                 f"{dir_color}●{C.RESET} Price: {C.WHITE}{C.BOLD}{price:.3f}{C.RESET}  "
@@ -895,19 +1613,22 @@ class TickStreakTracker:
                 f"{C.GREY}│{C.RESET} Next Stake: {C.WHITE}{stake:.2f} {currency}{C.RESET} {martingale.status_tag()}  "
                 f"{C.GREY}│{C.RESET} {stats.summary_line()}"
             )
-            await redis_manager.store_event(
-                worker_id=self.worker_id,
-                event_type="status",
-                event_data={
-                    "type": "banner",
-                    "level": "info",
-                    "title": "Tick Analysis",
-                    "desc": f"{dir_color}●{C.RESET} Price: {C.WHITE}{C.BOLD}{price:.3f}{C.RESET}  "
-                    f"Streak: {dir_color}{self.streak:+d}{C.RESET} {direction_emoji} {streak_meter}  "
-                    f"{C.GREY}│{C.RESET} Latency: {latency_color}{latency}ms{C.RESET} "
-                    f"{C.GREY}({tick_freq}){C.RESET}  "
-                    f"{C.GREY}│{C.RESET} Next Stake: {C.WHITE}{stake:.2f} {currency}{C.RESET} {martingale.status_tag()}  "
-                    f"{C.GREY}│{C.RESET} {stats.summary_line()}",
+
+        # Store market data periodically
+        if self.event_manager and len(self.prices) % 5 == 0:
+            await self.event_manager.market_event(
+                "tick_analysis",
+                EventLevel.DEBUG,
+                f"Tick analysis: streak={self.streak:+d}, price={price:.3f}",
+                symbol="R_100",
+                price=price,
+                streak=self.streak,
+                latency_ms=latency,
+                tick_interval_ms=float(tick_freq[:-2]) if tick_freq != "N/A" else None,
+                data={
+                    "stake": stake,
+                    "martingale_status": martingale.status_tag(),
+                    "summary": stats.summary_line(),
                 },
             )
 
@@ -931,7 +1652,9 @@ class TickStreakTracker:
 
 
 # ==================== BANNER ====================
-async def print_banner(config, martingale, worker_id=None, logger=None):
+
+
+async def print_banner(config, martingale, event_manager=None, logger=None):
     mg_line = (
         f"{C.GREY}Martingale:{C.RESET} {C.GREEN}ON{C.RESET} (x{config['martingale_multiplier']}, max {config['max_martingale_steps']} steps)"
         if config.get("martingale_enabled", True)
@@ -949,31 +1672,34 @@ async def print_banner(config, martingale, worker_id=None, logger=None):
 """
     print(banner)
 
-    # Store banner event if we have worker_id and logger
-    if worker_id:
-
-        event_data = {
-            "message": "Banner displayed",
-            "symbol": config["symbol"],
-            "base_stake": config["base_stake"],
-            "currency": config["currency"],
-            "target_streak": config["target_streak"],
-            "martingale_enabled": config.get("martingale_enabled", True),
-            "martingale_multiplier": config.get("martingale_multiplier", 2.0),
-            "max_martingale_steps": config.get("max_martingale_steps", 7),
-        }
-
-        await redis_manager.store_event(worker_id, "banner_displayed", event_data)
-        print(
-            "🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆 Worker ID found! Storing event... 🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆"
+    if event_manager:
+        await event_manager.config_event(
+            "banner_displayed",
+            EventLevel.INFO,
+            "Bot configuration banner displayed",
+            title="Bot Configuration",
+            description="Bot started with configuration",
+            data={
+                "symbol": config["symbol"],
+                "base_stake": config["base_stake"],
+                "currency": config["currency"],
+                "target_streak": config["target_streak"],
+                "martingale_enabled": config.get("martingale_enabled", True),
+                "martingale_multiplier": config.get("martingale_multiplier", 2.0),
+                "max_martingale_steps": config.get("max_martingale_steps", 7),
+                "stop_loss_percent": config.get("stop_loss_percent", 100),
+                "heartbeat_interval": config.get("heartbeat_interval", 5),
+                "max_reconnect_attempts": config.get("max_reconnect_attempts", 5),
+            },
         )
+        print("🏆 Event stored with consistent schema! 🏆")
     else:
-        print(
-            "❌❌❌❌❌❌❌❌❌❌❌❌❌❌ Event not persisted!!! ❌❌❌❌❌❌❌❌❌❌❌❌❌❌"
-        )
+        print("⚠️ Event manager not available - events not persisted")
 
 
 # ==================== HELPER FUNCTIONS ====================
+
+
 async def get_account_balance(client):
     res = await client.send({"balance": 1})
     if "error" in res:
@@ -982,35 +1708,12 @@ async def get_account_balance(client):
 
 
 # ==================== MAIN WORKER FUNCTION ====================
+
+
 async def run_worker(config, logger=None, worker_id=None):
     """
     Main worker function that accepts all parameters via config dict.
-
-    Required config keys:
-    - api_token: str
-    - symbol: str
-    - currency: str
-    - base_stake: float (will be overridden by balance percentage if set)
-    - initial_stake_percentage: float (percentage of balance to use as base stake)
-    - target_streak: int
-    - contract_duration: int
-    - cooldown_seconds: int
-    - max_latency_ms: int
-    - martingale_enabled: bool
-    - martingale_multiplier: float
-    - max_martingale_steps: int
-    - max_stake: float
-    - heartbeat_interval: int
-    - max_reconnect_attempts: int
-    - reconnect_delay: int
-    - stop_loss_percent: float
-    - poll_timeout: int
-    - poll_interval: float
-    - app_id: str (optional, default "1089")
-    - account_type: str (optional, default "demo")
-    - min_stake: float (optional, default 0.35)
     """
-
     # Setup logging
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(ColorFormatter())
@@ -1044,361 +1747,432 @@ async def run_worker(config, logger=None, worker_id=None):
     poll_interval = config.get("poll_interval", 0.3)
     signal_cooldown = config.get("signal_cooldown", 1.0)
 
-    # ============ ADD THIS CODE HERE ============
     # Get worker_id from config or generate one
     if not worker_id:
         worker_id = config.get(
             "worker_id", f"worker_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         )
 
-    # Store initial events
-    if logger:
-        await store_event(
-            worker_id,
+    # Initialize event storage manager
+    event_manager = EventStorageManager(worker_id, logger)
+    await event_manager.start()
+
+    try:
+        # Store worker start event
+        await event_manager.system_event(
             "worker_start",
-            {
-                "message": "Worker starting",
+            EventLevel.INFO,
+            f"Worker {worker_id} starting",
+            title="Worker Starting",
+            description=f"Worker {worker_id} starting",
+            data={
                 "symbol": symbol,
                 "currency": currency,
                 "base_stake": config.get("base_stake"),
-                "config": {
-                    k: v for k, v in config.items() if k != "api_token"
-                },  # Don't store sensitive data
-            },
-            logger,
-        )
-    # ============ END OF ADDED CODE ============
-
-    # beginning of client stream data...
-    from redis_manager import redis_manager
-
-    logger.info(
-        f"{C.GREY}🚀 Starting worker {worker_id} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
-    )
-
-    await redis_manager.store_event(
-        worker_id=worker_id,
-        event_type="worker_booting",
-        event_data={
-            "type": "logline",
-            "level": "info",
-            "desc": f"Worker thread {worker_id} started at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}",
-        },
-    )
-
-    # Fetch balance
-    logger.info(f"{C.CYAN}💰 Fetching live account balance...{C.RESET}")
-    await redis_manager.store_event(
-        worker_id=worker_id,
-        event_type="fetching_balance",
-        event_data={
-            "type": "logline",
-            "level": "info",
-            "desc": "Fetching live account balance...",
-        },
-    )
-    try:
-        balance_client = DerivClient(
-            ws_url=get_ws_url(account_type=account_type, token=api_token, app_id=app_id)
-        )
-        await balance_client.connect()
-        initial_balance = await get_account_balance(balance_client)
-        await balance_client.close()
-    except Exception as e:
-        logger.error(f"{C.RED}❌ Failed to fetch balance: {e}{C.RESET}")
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="fetching_balance_failed",
-            event_data={
-                "type": "logline",
-                "level": "error",
-                "desc": f"Failed to fetch balance: {e}.",
-            },
-        )
-        return
-
-    if initial_balance <= 0:
-        logger.error(f"{C.RED}❌ Invalid or zero balance returned — aborting.{C.RESET}")
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="invalid_or_zero_balance_returned",
-            event_data={
-                "type": "logline",
-                "level": "error",
-                "desc": "Invalid or zero balance returned. Aborting...",
-            },
-        )
-        return
-
-    # Calculate base stake from balance percentage
-    base_stake = round(initial_balance * initial_stake_percentage / 100, 2)
-    if base_stake < min_stake:
-        logger.warning(
-            f"Calculated base stake from balance of {initial_balance} {currency} is {base_stake} {currency}. "
-            f"Resetting to absolute minimum {min_stake} {currency}... Please consider recharging your balance."
-        )
-        base_stake = min_stake
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="invalid_or_zero_balance_returned",
-            event_data={
-                "type": "banner",
-                "level": "warning",
-                "title": "Low Funds",
-                "desc": f"Calculated base stake from balance of {initial_balance} {currency} is {base_stake} {currency}. "
-                f"Resetting to absolute minimum {min_stake} {currency}... Please consider recharging your balance.",
+                "config": {k: v for k, v in config.items() if k != "api_token"},
             },
         )
 
-    full_config = {
-        "api_token": api_token,
-        "symbol": symbol,
-        "currency": currency,
-        "app_id": app_id,
-        "account_type": account_type,
-        "base_stake": base_stake,
-        "min_stake": min_stake,
-        "initial_stake_percentage": initial_stake_percentage,
-        "target_streak": target_streak,
-        "contract_duration": contract_duration,
-        "cooldown_seconds": cooldown_seconds,
-        "max_latency_ms": max_latency_ms,
-        "martingale_enabled": martingale_enabled,
-        "martingale_multiplier": martingale_multiplier,
-        "max_martingale_steps": max_martingale_steps,
-        "max_stake": max_stake,
-        "heartbeat_interval": heartbeat_interval,
-        "max_reconnect_attempts": max_reconnect_attempts,
-        "stop_loss_percent": stop_loss_percent,
-        "poll_timeout": poll_timeout,
-        "poll_interval": poll_interval,
-        "signal_cooldown": signal_cooldown,
-    }
+        logger.info(
+            f"{C.GREY}🚀 Starting worker {worker_id} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
+        )
 
-    logger.info(
-        f"{C.CYAN}📐 Base stake set to {initial_stake_percentage}% of balance: {C.BOLD}{base_stake} {currency}{C.RESET}"
-    )
-    await redis_manager.store_event(
-        worker_id=worker_id,
-        event_type="base_stake_set",
-        event_data={
-            "type": "logline",
-            "level": "info",
-            "desc": f"Base stake set to {initial_stake_percentage}% of balance ({base_stake} {currency})",
-        },
-    )
+        # Store worker booting event
+        await event_manager.system_event(
+            "worker_booting",
+            EventLevel.INFO,
+            f"Worker thread {worker_id} started",
+            title="Worker Booting",
+            description=f"Worker thread {worker_id} started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        )
 
-    # Initialize components
-    stats = SessionStats(initial_balance=initial_balance, currency=currency)
-    logger.info(
-        f"{C.GREY}💰 Starting Balance: {stats.initial_balance:.2f} {currency}{C.RESET}"
-    )
-    await redis_manager.store_event(
-        worker_id=worker_id,
-        event_type="base_stake_set",
-        event_data={
-            "type": "logline",
-            "level": "info",
-            "desc": f"Starting Balance: {stats.initial_balance:.2f} {currency}",
-        },
-    )
+        # Fetch balance
+        logger.info(f"{C.CYAN}💰 Fetching live account balance...{C.RESET}")
+        await event_manager.system_event(
+            "fetching_balance",
+            EventLevel.INFO,
+            "Fetching live account balance...",
+            title="Fetching Balance",
+        )
 
-    martingale = MartingaleManager(
-        base_stake=base_stake,
-        multiplier=martingale_multiplier,
-        enabled=martingale_enabled,
-        max_steps=max_martingale_steps,
-        max_stake=max_stake,
-    )
-    martingale.set_logger(logger)
+        try:
+            balance_client = DerivClient(
+                ws_url=get_ws_url(
+                    account_type=account_type, token=api_token, app_id=app_id
+                )
+            )
+            await balance_client.connect()
+            initial_balance = await get_account_balance(balance_client)
+            await balance_client.close()
+        except Exception as e:
+            error_msg = f"Failed to fetch balance: {e}"
+            logger.error(f"{C.RED}❌ {error_msg}{C.RESET}")
+            await event_manager.error_event(
+                "fetch_balance_failed",
+                EventLevel.ERROR,
+                error_msg,
+                title="Balance Fetch Failed",
+                description=error_msg,
+                error=str(e),
+            )
+            return
 
-    await print_banner(full_config, martingale, worker_id=worker_id)
-    await redis_manager.store_event(
-        worker_id=worker_id,
-        event_type="trade_kickoff",
-        event_data={
-            "type": "banner",
-            "level": "info",
-            "title": "Trade has kicked off",
-            "desc": {
+        if initial_balance <= 0:
+            error_msg = "Invalid or zero balance returned — aborting."
+            logger.error(f"{C.RED}❌ {error_msg}{C.RESET}")
+            await event_manager.error_event(
+                "invalid_balance",
+                EventLevel.ERROR,
+                error_msg,
+                title="Invalid Balance",
+                description=error_msg,
+                data={"balance": initial_balance},
+            )
+            return
+
+        # Calculate base stake from balance percentage
+        base_stake = round(initial_balance * initial_stake_percentage / 100, 2)
+        if base_stake < min_stake:
+            warning_msg = f"Calculated base stake from balance of {initial_balance} {currency} is {base_stake} {currency}. Resetting to absolute minimum {min_stake} {currency}... Please consider recharging your balance."
+            logger.warning(warning_msg)
+            base_stake = min_stake
+            await event_manager.system_event(
+                "low_balance_warning",
+                EventLevel.WARNING,
+                warning_msg,
+                title="Low Funds",
+                description=warning_msg,
+                data={
+                    "initial_balance": initial_balance,
+                    "calculated_stake": base_stake,
+                    "min_stake": min_stake,
+                    "currency": currency,
+                },
+            )
+
+        full_config = {
+            "api_token": api_token,
+            "symbol": symbol,
+            "currency": currency,
+            "app_id": app_id,
+            "account_type": account_type,
+            "base_stake": base_stake,
+            "min_stake": min_stake,
+            "initial_stake_percentage": initial_stake_percentage,
+            "target_streak": target_streak,
+            "contract_duration": contract_duration,
+            "cooldown_seconds": cooldown_seconds,
+            "max_latency_ms": max_latency_ms,
+            "martingale_enabled": martingale_enabled,
+            "martingale_multiplier": martingale_multiplier,
+            "max_martingale_steps": max_martingale_steps,
+            "max_stake": max_stake,
+            "heartbeat_interval": heartbeat_interval,
+            "max_reconnect_attempts": max_reconnect_attempts,
+            "stop_loss_percent": stop_loss_percent,
+            "poll_timeout": poll_timeout,
+            "poll_interval": poll_interval,
+            "signal_cooldown": signal_cooldown,
+        }
+
+        logger.info(
+            f"{C.CYAN}📐 Base stake set to {initial_stake_percentage}% of balance: {C.BOLD}{base_stake} {currency}{C.RESET}"
+        )
+        await event_manager.config_event(
+            "base_stake_set",
+            EventLevel.INFO,
+            f"Base stake set to {initial_stake_percentage}% of balance ({base_stake} {currency})",
+            title="Base Stake Set",
+            description="Base stake configured",
+            data={
+                "initial_balance": initial_balance,
+                "percentage": initial_stake_percentage,
+                "base_stake": base_stake,
+                "currency": currency,
+            },
+        )
+
+        # Initialize components
+        stats = SessionStats(initial_balance=initial_balance, currency=currency)
+        stats.set_event_manager(event_manager)
+
+        logger.info(
+            f"{C.GREY}💰 Starting Balance: {stats.initial_balance:.2f} {currency}{C.RESET}"
+        )
+        await event_manager.stats_event(
+            "starting_balance",
+            EventLevel.INFO,
+            f"Starting Balance: {stats.initial_balance:.2f} {currency}",
+            title="Starting Balance",
+            description="Initial account balance",
+            data={"balance": stats.initial_balance, "currency": currency},
+        )
+
+        martingale = MartingaleManager(
+            base_stake=base_stake,
+            multiplier=martingale_multiplier,
+            enabled=martingale_enabled,
+            max_steps=max_martingale_steps,
+            max_stake=max_stake,
+        )
+        martingale.set_logger(logger)
+        martingale.set_event_manager(event_manager)
+
+        await print_banner(
+            full_config, martingale, event_manager=event_manager, logger=logger
+        )
+
+        await event_manager.system_event(
+            "trade_kickoff",
+            EventLevel.INFO,
+            "Trade has kicked off",
+            title="Trade Kickoff",
+            description="Trading session started",
+            data={
                 "symbol": full_config.get("symbol"),
                 "base_stake": full_config.get("base_stake"),
                 "target_streak": full_config.get("target_streak"),
                 "stop_loss": round(stop_loss_percent / 100 * initial_balance, 2),
-            },
-        },
-    )
-
-    trade_manager = PersistentTradeManager(full_config, logger, stats, martingale)
-
-    logger.info("🔌 Pre-connecting trading connections...")
-    await trade_manager.ensure_execution_client()
-    await trade_manager.ensure_polling_client()
-    logger.info(f"{C.GREEN}✅ Trading connections ready.{C.RESET}")
-
-    worker_task = asyncio.create_task(trade_manager.trade_worker())
-    logger.info("🚀 Trade worker started.")
-
-    # Connect to tick stream
-    ws_url_ticks = get_ws_url(account_type=account_type, token=api_token, app_id=app_id)
-    tick_client = DerivClient(ws_url_ticks)
-
-    try:
-        await tick_client.connect()
-        logger.info(
-            f"{C.GREEN}✅ Streaming connection successfully established.{C.RESET}"
-        )
-
-        logger.info(f"Subscribing to tick stream for {C.CYAN}{symbol}{C.RESET}...")
-        await tick_client.ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
-
-        tracker = TickStreakTracker(
-            target_streak=target_streak,
-            max_allowed_latency_ms=max_latency_ms,
-            signal_cooldown=signal_cooldown,
-            worker_id=worker_id,
-        )
-        tracker.set_logger(logger)
-
-        last_signal_time = 0
-
-        logger.info(
-            f"{C.CYAN}👁️ Now analyzing market... Awaiting {C.BOLD}{target_streak}{C.RESET} tick streak on {C.CYAN}{symbol}{C.RESET}."
-        )
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="tick_stream_subscription",
-            event_data={
-                "type": "banner",
-                "level": "info",
-                "title": "Subscribed to tick stream",
-                "desc": {
-                    "trading_connections_pre_connected": "Pre-connected trading connections",
-                    "trade_worker_started": "Trade worker has spawned.",
-                    "streaming_connection_established": "Streaming connection successfully established.",
-                    "tick_stream_subscribed": f"Subscribed to tick stream for {symbol}",
-                },
-            },
-        )
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="analyzing_market",
-            event_data={
-                "type": "logline",
-                "level": "info",
-                "desc": f"Now analyzing market... Awaiting {target_streak} tick streak on {symbol}.",
+                "initial_balance": initial_balance,
             },
         )
 
-        async for message_str in tick_client.ws:
-            message = json.loads(message_str)
+        trade_manager = PersistentTradeManager(full_config, logger, stats, martingale)
+        trade_manager.set_event_manager(event_manager)
 
-            if message.get("msg_type") == "tick":
-                tick_data = message.get("tick", {})
-                price = float(tick_data.get("quote"))
-                epoch = float(tick_data.get("epoch"))
+        logger.info("🔌 Pre-connecting trading connections...")
+        await trade_manager.ensure_execution_client()
+        await trade_manager.ensure_polling_client()
+        logger.info(f"{C.GREEN}✅ Trading connections ready.{C.RESET}")
 
-                # Process tick and get live analysis output
-                signal = await tracker.process_new_tick(
-                    price, epoch, martingale, stats, currency
-                )
-
-                current_time = time.time()
-                if current_time - last_signal_time < cooldown_seconds:
-                    continue
-
-                if signal in ["CALL", "PUT"]:
-                    sig_color = C.GREEN if signal == "CALL" else C.RED
-                    logger.info(
-                        f"{C.YELLOW}🔥 Strike Streak Confirmed!{C.RESET} Triggering {sig_color}{C.BOLD}{signal}{C.RESET} order at price {C.WHITE}{price:.3f}{C.RESET}"
-                    )
-
-                    await redis_manager.store_event(
-                        worker_id=worker_id,
-                        event_type="strike_streak_confirmed",
-                        event_data={
-                            "type": "banner",
-                            "level": "crimson",
-                            "title": "Streak Confirmed!",
-                            "desc": f"Strike Streak Confirmed! Triggering {signal} order at price {price:.3f}",
-                        },
-                    )
-
-                    trade_manager.queue_trade(signal, symbol, currency)
-                    last_signal_time = current_time
-                    tracker.streak = 0
-
-            elif "error" in message:
-                logger.error(
-                    f"{C.RED}❌ WebSocket incoming error: {message['error'].get('message')}{C.RESET}"
-                )
-                await redis_manager.store_event(
-                    worker_id=worker_id,
-                    event_type="websocket_incoming_error",
-                    event_data={
-                        "type": "logline",
-                        "level": "error",
-                        "desc": f"WebSocket incoming error: {message['error'].get('message')}",
-                    },
-                )
-
-    except asyncio.CancelledError:
-        logger.info("Bot execution cancelled. Shutting down gracefully...")
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="bot_execution_cancelled",
-            event_data={
-                "type": "logline",
-                "level": "crimson",
-                "desc": "Bot execution cancelled. Shutting down gracefully...",
-            },
+        await event_manager.connection_event(
+            "connections_ready",
+            EventLevel.SUCCESS,
+            "Trading connections ready",
+            title="Connections Ready",
+            description="Both execution and polling clients are ready",
         )
-    except Exception as e:
-        logger.error(f"{C.RED}❌ Critical failure: {e}{C.RESET}", exc_info=True)
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="bot_execution_cancelled",
-            event_data={
-                "type": "logline",
-                "level": "error",
-                "desc": f"Critical failure: {e}",
-            },
-        )
-    finally:
-        logger.info("Tearing down active connections...")
-        logger.info(stats.detailed_summary())
 
-        worker_task.cancel()
+        worker_task = asyncio.create_task(trade_manager.trade_worker())
+        logger.info("🚀 Trade worker started.")
+
+        await event_manager.system_event(
+            "trade_worker_started",
+            EventLevel.INFO,
+            "Trade worker started",
+            title="Trade Worker Started",
+            description="Trade worker task is running",
+        )
+
+        # Connect to tick stream
+        ws_url_ticks = get_ws_url(
+            account_type=account_type, token=api_token, app_id=app_id
+        )
+        tick_client = DerivClient(ws_url_ticks)
+
         try:
-            await worker_task
-        except Exception:
-            pass
+            await tick_client.connect()
+            logger.info(
+                f"{C.GREEN}✅ Streaming connection successfully established.{C.RESET}"
+            )
 
-        if tick_client and tick_client.ws is not None:
-            await tick_client.close()
+            await event_manager.connection_event(
+                "streaming_connected",
+                EventLevel.SUCCESS,
+                "Streaming connection successfully established",
+                title="Streaming Connected",
+                description="Tick stream connection established",
+            )
 
-        await trade_manager.close()
-        logger.info(
-            f"{C.GREY}🛑 Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
-        )
-        await redis_manager.store_event(
-            worker_id=worker_id,
-            event_type="final_words",
-            event_data={
-                "type": "banner",
-                "level": "crimson",
-                "title": "Final teardown",
-                "desc": {
-                    "teardown": "Active connections teared down",
-                    "worker_termination": f"Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            logger.info(f"Subscribing to tick stream for {C.CYAN}{symbol}{C.RESET}...")
+            await tick_client.ws.send(json.dumps({"ticks": symbol, "subscribe": 1}))
+
+            await event_manager.connection_event(
+                "tick_stream_subscribed",
+                EventLevel.INFO,
+                f"Subscribed to tick stream for {symbol}",
+                title="Tick Stream Subscribed",
+                description=f"Subscribed to tick stream for {symbol}",
+                data={"symbol": symbol},
+            )
+
+            tracker = TickStreakTracker(
+                target_streak=target_streak,
+                max_allowed_latency_ms=max_latency_ms,
+                signal_cooldown=signal_cooldown,
+                worker_id=worker_id,
+            )
+            tracker.set_logger(logger)
+            tracker.set_event_manager(event_manager)
+
+            last_signal_time = 0
+
+            logger.info(
+                f"{C.CYAN}👁️ Now analyzing market... Awaiting {C.BOLD}{target_streak}{C.RESET} tick streak on {C.CYAN}{symbol}{C.RESET}."
+            )
+
+            await event_manager.market_event(
+                "analyzing_market",
+                EventLevel.INFO,
+                f"Now analyzing market... Awaiting {target_streak} tick streak on {symbol}.",
+                title="Analyzing Market",
+                description=f"Monitoring {symbol} for {target_streak} tick streak",
+                symbol=symbol,
+                data={"target_streak": target_streak},
+            )
+
+            async for message_str in tick_client.ws:
+                message = json.loads(message_str)
+
+                if message.get("msg_type") == "tick":
+                    tick_data = message.get("tick", {})
+                    price = float(tick_data.get("quote"))
+                    epoch = float(tick_data.get("epoch"))
+
+                    # Process tick and get live analysis output
+                    signal = await tracker.process_new_tick(
+                        price, epoch, martingale, stats, currency
+                    )
+
+                    current_time = time.time()
+                    if current_time - last_signal_time < cooldown_seconds:
+                        continue
+
+                    if signal in ["CALL", "PUT"]:
+                        sig_color = C.GREEN if signal == "CALL" else C.RED
+                        logger.info(
+                            f"{C.YELLOW}🔥 Strike Streak Confirmed!{C.RESET} Triggering {sig_color}{C.BOLD}{signal}{C.RESET} order at price {C.WHITE}{price:.3f}{C.RESET}"
+                        )
+
+                        await event_manager.trade_event(
+                            "streak_confirmed",
+                            EventLevel.TRADE,
+                            f"Streak confirmed! Triggering {signal} order",
+                            title="Streak Confirmed!",
+                            description=f"Triggering {signal} order at price {price:.3f}",
+                            symbol=symbol,
+                            signal=signal,
+                            entry_price=price,
+                            data={
+                                "streak": tracker.streak,
+                                "target_streak": target_streak,
+                            },
+                        )
+
+                        trade_manager.queue_trade(signal, symbol, currency)
+                        last_signal_time = current_time
+                        tracker.streak = 0
+
+                elif "error" in message:
+                    error_msg = message["error"].get("message", "Unknown error")
+                    logger.error(
+                        f"{C.RED}❌ WebSocket incoming error: {error_msg}{C.RESET}"
+                    )
+                    await event_manager.error_event(
+                        "websocket_error",
+                        EventLevel.ERROR,
+                        f"WebSocket incoming error: {error_msg}",
+                        title="WebSocket Error",
+                        description=error_msg,
+                        error=error_msg,
+                    )
+
+        except asyncio.CancelledError:
+            logger.info("Bot execution cancelled. Shutting down gracefully...")
+            await event_manager.system_event(
+                "bot_cancelled",
+                EventLevel.WARNING,
+                "Bot execution cancelled. Shutting down gracefully...",
+                title="Bot Cancelled",
+                description="Bot execution was cancelled",
+            )
+        except Exception as e:
+            import traceback
+            error_msg = f"Critical failure: {e}"
+            logger.error(f"{C.RED}❌ {error_msg}{C.RESET}", exc_info=True)
+            await event_manager.error_event(
+                "critical_failure",
+                EventLevel.CRITICAL,
+                error_msg,
+                title="Critical Failure",
+                description=error_msg,
+                error=str(e),
+                traceback="".join(traceback.format_stack()),
+            )
+            import traceback
+        finally:
+            logger.info("Tearing down active connections...")
+            logger.info(stats.detailed_summary())
+
+            # Store final summary
+            await event_manager.stats_event(
+                "final_summary",
+                EventLevel.INFO,
+                f"Final summary: {stats.trades} trades, {stats.net_pl:.2f} {currency} P/L",
+                title="Final Summary",
+                description="Session statistics",
+                data={
+                    "total_trades": stats.trades,
+                    "wins": stats.wins,
+                    "losses": stats.losses,
+                    "win_rate": (
+                        (stats.wins / stats.trades * 100) if stats.trades else 0
+                    ),
+                    "net_pl": stats.net_pl,
+                    "final_balance": stats.get_current_balance(),
+                    "max_drawdown": stats.max_drawdown,
+                    "max_consecutive_losses": stats.max_consecutive_losses,
+                    "currency": currency,
                 },
-            },
-        )
+            )
 
-        return stats
+            worker_task.cancel()
+            try:
+                await worker_task
+            except Exception:
+                pass
+
+            if tick_client and tick_client.ws is not None:
+                await tick_client.close()
+
+            await trade_manager.close()
+            logger.info(
+                f"{C.GREY}🛑 Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
+            )
+
+            await event_manager.system_event(
+                "bot_stopped",
+                EventLevel.INFO,
+                f"Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                title="Bot Stopped",
+                description="Bot gracefully stopped",
+            )
+
+            # Stop event manager
+            await event_manager.stop()
+
+            return stats
+
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        if event_manager:
+            await event_manager.error_event(
+                "fatal_error",
+                EventLevel.CRITICAL,
+                f"Fatal error: {e}",
+                title="Fatal Error",
+                description=str(e),
+                error=str(e),
+                traceback="".join(traceback.format_stack()),
+            )
+            await event_manager.stop()
+        raise
+    finally:
+        await event_manager.stop()
 
 
 # ==================== MAIN ENTRY POINT ====================
+
 if __name__ == "__main__":
     # Load environment variables
     load_dotenv()
