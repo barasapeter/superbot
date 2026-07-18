@@ -14,6 +14,7 @@ from typing import Dict, Any
 
 # worker.py - Add event storage function
 
+
 async def store_event(
     worker_id: str, event_type: str, event_data: Dict[str, Any], logger=None
 ):
@@ -908,7 +909,7 @@ async def print_banner(config, martingale, worker_id=None, logger=None):
     print(banner)
 
     # Store banner event if we have worker_id and logger
-    if worker_id and logger:
+    if worker_id:
         from redis_manager import redis_manager
 
         event_data = {
@@ -923,7 +924,13 @@ async def print_banner(config, martingale, worker_id=None, logger=None):
         }
 
         await redis_manager.store_event(worker_id, "banner_displayed", event_data)
-        logger.info("📋 Banner event stored - Worker ready")
+        print(
+            "🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆 Worker ID found! Storing event... 🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆"
+        )
+    else:
+        print(
+            "❌❌❌❌❌❌❌❌❌❌❌❌❌❌ Event not persisted!!! ❌❌❌❌❌❌❌❌❌❌❌❌❌❌"
+        )
 
 
 # ==================== HELPER FUNCTIONS ====================
@@ -932,9 +939,6 @@ async def get_account_balance(client):
     if "error" in res:
         return 0.0
     return float(res.get("balance", {}).get("balance", 0.0))
-
-
-
 
 
 # ==================== MAIN WORKER FUNCTION ====================
@@ -1099,7 +1103,7 @@ async def run_worker(config, logger=None, worker_id=None):
     )
     martingale.set_logger(logger)
 
-    await print_banner(full_config, martingale)
+    await print_banner(full_config, martingale, worker_id=worker_id)
 
     trade_manager = PersistentTradeManager(full_config, logger, stats, martingale)
 
