@@ -81,7 +81,7 @@ class DerivClient:
             except websockets.exceptions.ConnectionClosed:
                 self._connected = False
                 raise
-            except Exception as e:
+            except Exception:
                 self._connected = False
                 raise
 
@@ -98,7 +98,7 @@ class DerivClient:
             except websockets.exceptions.ConnectionClosed:
                 self._connected = False
                 raise
-            except Exception as e:
+            except Exception:
                 self._connected = False
                 raise
 
