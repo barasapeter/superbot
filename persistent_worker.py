@@ -16,6 +16,8 @@ class PersistentWorker:
     def __init__(self, worker_id: str, config: Dict[str, Any]):
         self.worker_id = worker_id
         self.config = config
+        # Add worker_id to config so worker.py can use it
+        self.config["worker_id"] = worker_id
         self.task: Optional[asyncio.Task] = None
         self.is_running = False
         self.is_stopping = False
@@ -87,7 +89,9 @@ class PersistentWorker:
         # Store task in global registry
         worker_tasks[self.worker_id] = self.task
 
-        self.logger.info(f"🚀 Worker {self.worker_id} started")
+        self.logger.info(
+            f"🚀 Worker {self.worker_id} started"
+        )  # this is all the logs I get.
 
     async def _run(self):
         """Main worker execution with persistence"""
@@ -98,10 +102,20 @@ class PersistentWorker:
                 {"status": "running", "last_heartbeat": datetime.now().isoformat()},
             )
 
+            # Store start event
+            await self.store_event(
+                "worker_lifecycle",
+                {
+                    "status": "starting",
+                    "message": f"Worker {self.worker_id} starting",
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
             # Run the actual worker
             # We need to capture the stats from the worker
             # This requires modifying the run_worker function to return stats
-            self.stats = await run_worker(self.config, self.logger)
+            self.stats = await run_worker(self.config, self.logger, self.worker_id)
 
             # Save completion state
             if self.stats:
@@ -165,6 +179,15 @@ class PersistentWorker:
     async def get_logs(self, limit: int = 100, since: Optional[datetime] = None):
         """Get logs for this worker"""
         return await redis_manager.get_log_history(self.worker_id, limit, since)
+
+    async def store_event(self, event_type: str, event_data: Dict[str, Any]):
+        """Store a structured event"""
+        event_data["worker_id"] = self.worker_id
+        return await redis_manager.store_event(self.worker_id, event_type, event_data)
+
+    async def get_events(self, event_type: Optional[str] = None, limit: int = 100):
+        """Get events for this worker"""
+        return await redis_manager.get_events(self.worker_id, event_type, limit)
 
 
 # Global worker registry

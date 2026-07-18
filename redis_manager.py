@@ -123,6 +123,78 @@ class RedisManager:
         """Unsubscribe from logs for a specific worker"""
         await self.pubsub.unsubscribe(f"worker:{worker_id}:logs")
 
+    # ============ EVENT STORAGE ============
+    async def store_event(
+        self, worker_id: str, event_type: str, event_data: Dict[str, Any]
+    ):
+        """Store a structured event with specific type"""
+        event = {
+            "type": event_type,
+            "timestamp": datetime.now().isoformat(),
+            "worker_id": worker_id,
+            "data": event_data,
+        }
+
+        # Store in event history (keep last 1000 events)
+        history_key = f"worker:{worker_id}:events:history"
+        await self.redis.lpush(history_key, json.dumps(event))
+        await self.redis.ltrim(history_key, 0, 999)
+        await self.redis.expire(history_key, 86400 * 7)  # 7 days
+
+        # Store by event type for easy filtering
+        type_key = f"worker:{worker_id}:events:{event_type}"
+        await self.redis.lpush(type_key, json.dumps(event))
+        await self.redis.ltrim(type_key, 0, 99)  # Keep last 100 per type
+        await self.redis.expire(type_key, 86400 * 7)
+
+        # Publish to real-time channel
+        await self.redis.publish(f"worker:{worker_id}:events", json.dumps(event))
+
+        return event
+
+    async def get_events(
+        self,
+        worker_id: str,
+        event_type: Optional[str] = None,
+        limit: int = 100,
+        since: Optional[datetime] = None,
+    ) -> List[Dict]:
+        """Get events for a worker, optionally filtered by type"""
+        if event_type:
+            key = f"worker:{worker_id}:events:{event_type}"
+        else:
+            key = f"worker:{worker_id}:events:history"
+
+        events = await self.redis.lrange(key, 0, limit - 1)
+
+        parsed_events = []
+        for event in events:
+            try:
+                entry = json.loads(event)
+                if since:
+                    event_time = datetime.fromisoformat(entry["timestamp"])
+                    if event_time < since:
+                        continue
+                parsed_events.append(entry)
+            except Exception:
+                continue
+
+        return parsed_events
+
+    async def get_latest_event(self, worker_id: str, event_type: str) -> Optional[Dict]:
+        """Get the latest event of a specific type"""
+        key = f"worker:{worker_id}:events:{event_type}"
+        event = await self.redis.lindex(key, 0)
+        if event:
+            return json.loads(event)
+        return None
+
+    async def get_all_event_types(self, worker_id: str) -> List[str]:
+        """Get all event types for a worker"""
+        pattern = f"worker:{worker_id}:events:*"
+        keys = await self.redis.keys(pattern)
+        return [key.split(":")[-1] for key in keys]
+
 
 # Global Redis instance
 redis_manager = RedisManager()

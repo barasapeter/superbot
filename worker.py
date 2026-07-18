@@ -10,6 +10,27 @@ from datetime import datetime
 from dotenv import load_dotenv
 from core.auth import get_ws_url
 from disposables.client_experiment2 import DerivClient
+from typing import Dict, Any
+
+# worker.py - Add event storage function
+
+async def store_event(
+    worker_id: str, event_type: str, event_data: Dict[str, Any], logger=None
+):
+    """Store event in Redis and log it"""
+    try:
+        from redis_manager import redis_manager
+
+        event = await redis_manager.store_event(worker_id, event_type, event_data)
+        if logger:
+            logger.info(
+                f"📝 Event stored: {event_type} - {event_data.get('message', '')}"
+            )
+        return event
+    except Exception as e:
+        if logger:
+            logger.error(f"Failed to store event: {e}")
+        return None
 
 
 # ==================== TERMINAL COLORS ====================
@@ -868,7 +889,7 @@ class TickStreakTracker:
 
 
 # ==================== BANNER ====================
-def print_banner(config, martingale):
+async def print_banner(config, martingale, worker_id=None, logger=None):
     mg_line = (
         f"{C.GREY}Martingale:{C.RESET} {C.GREEN}ON{C.RESET} (x{config['martingale_multiplier']}, max {config['max_martingale_steps']} steps)"
         if config.get("martingale_enabled", True)
@@ -886,6 +907,24 @@ def print_banner(config, martingale):
 """
     print(banner)
 
+    # Store banner event if we have worker_id and logger
+    if worker_id and logger:
+        from redis_manager import redis_manager
+
+        event_data = {
+            "message": "Banner displayed",
+            "symbol": config["symbol"],
+            "base_stake": config["base_stake"],
+            "currency": config["currency"],
+            "target_streak": config["target_streak"],
+            "martingale_enabled": config.get("martingale_enabled", True),
+            "martingale_multiplier": config.get("martingale_multiplier", 2.0),
+            "max_martingale_steps": config.get("max_martingale_steps", 7),
+        }
+
+        await redis_manager.store_event(worker_id, "banner_displayed", event_data)
+        logger.info("📋 Banner event stored - Worker ready")
+
 
 # ==================== HELPER FUNCTIONS ====================
 async def get_account_balance(client):
@@ -895,8 +934,11 @@ async def get_account_balance(client):
     return float(res.get("balance", {}).get("balance", 0.0))
 
 
+
+
+
 # ==================== MAIN WORKER FUNCTION ====================
-async def run_worker(config, logger=None):
+async def run_worker(config, logger=None, worker_id=None):
     """
     Main worker function that accepts all parameters via config dict.
 
@@ -957,6 +999,31 @@ async def run_worker(config, logger=None):
     poll_timeout = config.get("poll_timeout", 25)
     poll_interval = config.get("poll_interval", 0.3)
     signal_cooldown = config.get("signal_cooldown", 1.0)
+
+    # ============ ADD THIS CODE HERE ============
+    # Get worker_id from config or generate one
+    if not worker_id:
+        worker_id = config.get(
+            "worker_id", f"worker_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+
+    # Store initial events
+    if logger:
+        await store_event(
+            worker_id,
+            "worker_start",
+            {
+                "message": "Worker starting",
+                "symbol": symbol,
+                "currency": currency,
+                "base_stake": config.get("base_stake"),
+                "config": {
+                    k: v for k, v in config.items() if k != "api_token"
+                },  # Don't store sensitive data
+            },
+            logger,
+        )
+    # ============ END OF ADDED CODE ============
 
     logger.info(
         f"{C.GREY}🚀 Starting bot at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
@@ -1032,7 +1099,7 @@ async def run_worker(config, logger=None):
     )
     martingale.set_logger(logger)
 
-    print_banner(full_config, martingale)
+    await print_banner(full_config, martingale)
 
     trade_manager = PersistentTradeManager(full_config, logger, stats, martingale)
 

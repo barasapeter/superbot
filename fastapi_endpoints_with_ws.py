@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 import asyncio
 import json
+from typing import Optional
 
 from persistent_worker import PersistentWorker, workers
 from redis_manager import redis_manager
@@ -182,6 +183,55 @@ async def get_worker_logs(worker_id: str, limit: int = 100):
 
     logs = await workers[worker_id].get_logs(limit)
     return {"worker_id": worker_id, "logs": logs, "count": len(logs)}
+
+
+# main_api.py - Add event endpoints
+
+
+@app.get("/workers/{worker_id}/events")
+async def get_worker_events(
+    worker_id: str, event_type: Optional[str] = None, limit: int = 100
+):
+    """Get events for a worker"""
+    if worker_id not in workers:
+        raise HTTPException(404, f"Worker {worker_id} not found")
+
+    events = await workers[worker_id].get_events(event_type, limit)
+    return {
+        "worker_id": worker_id,
+        "events": events,
+        "count": len(events),
+        "event_types": (
+            await redis_manager.get_all_event_types(worker_id)
+            if not event_type
+            else [event_type]
+        ),
+    }
+
+
+@app.get("/workers/{worker_id}/events/latest")
+async def get_latest_worker_event(worker_id: str, event_type: str):
+    """Get the latest event of a specific type"""
+    if worker_id not in workers:
+        raise HTTPException(404, f"Worker {worker_id} not found")
+
+    event = await redis_manager.get_latest_event(worker_id, event_type)
+    if not event:
+        raise HTTPException(
+            404, f"No event of type {event_type} found for worker {worker_id}"
+        )
+
+    return event
+
+
+@app.get("/workers/{worker_id}/events/types")
+async def get_worker_event_types(worker_id: str):
+    """Get all event types for a worker"""
+    if worker_id not in workers:
+        raise HTTPException(404, f"Worker {worker_id} not found")
+
+    types = await redis_manager.get_all_event_types(worker_id)
+    return {"worker_id": worker_id, "event_types": types}
 
 
 # ==================== WEBSOCKET ENDPOINTS ====================
