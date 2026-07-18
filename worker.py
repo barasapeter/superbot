@@ -532,6 +532,7 @@ class SessionStats:
             "profit": profit,
             "result": "WON" if profit > 0 else "LOST",
             "balance": current_balance,
+            "drawdown": f"{drawdown}%",
         }
         self.trade_history.append(trade_record)
 
@@ -576,7 +577,15 @@ class SessionStats:
             f"| Win Rate: {C.CYAN}{win_rate:.1f}%{C.RESET} "
             f"| Net P/L: {pl_color}{C.BOLD}{self.net_pl:+.2f} {self.currency}{C.RESET}"
             f"{active}{dd}"
-        )
+        ), {
+            "trades": self.trades,
+            "wins": self.wins,
+            "losses": self.losses,
+            "win_rate": f"{win_rate:.1f}%",
+            "net_pl": f"{self.net_pl:+.2f}",
+            "drawdown": f"{self.get_drawdown_percent():.2f}%",
+            "active": len(self.pending_trades),
+        }
 
     def detailed_summary(self):
         if not self.trade_history:
@@ -787,7 +796,10 @@ class MartingaleManager:
             return f"{C.ORANGE}[Pre-fetched x{self.step}]{C.RESET}"
         if self.step == 0:
             return f"{C.GREEN}[Base]{C.RESET}"
-        return f"{C.ORANGE}[Martingale x{self.step}]{C.RESET}"
+        return (
+            f"{C.ORANGE}[Martingale x{self.step}]{C.RESET}",
+            f"[Martingale x{self.step}]",
+        )
 
 
 # ==================== PERSISTENT TRADE MANAGER ====================
@@ -1348,7 +1360,7 @@ class PersistentTradeManager:
             sig_color = C.GREEN if signal == "CALL" else C.RED
             self.logger.info(
                 f"{C.PURPLE}⚡ EXECUTING{C.RESET} {sig_color}{signal}{C.RESET} at "
-                f"{C.BOLD}{stake} {currency}{C.RESET} {self.martingale.status_tag()}"
+                f"{C.BOLD}{stake} {currency}{C.RESET} {self.martingale.status_tag()[0]}"
             )
 
             contract_id, entry_price = await self.execute_trade_instant(
@@ -1382,7 +1394,7 @@ class PersistentTradeManager:
             self.stats.record(
                 profit, contract_id, signal, stake, entry_price, exit_price
             )
-            self.logger.info(self.stats.summary_line())
+            self.logger.info(self.stats.summary_line()[0])
 
             await self.martingale.record_result_async(won=profit > 0, currency=currency)
 
@@ -1610,8 +1622,8 @@ class TickStreakTracker:
                 f"Streak: {dir_color}{self.streak:+d}{C.RESET} {direction_emoji} {streak_meter}  "
                 f"{C.GREY}│{C.RESET} Latency: {latency_color}{latency}ms{C.RESET} "
                 f"{C.GREY}({tick_freq}){C.RESET}  "
-                f"{C.GREY}│{C.RESET} Next Stake: {C.WHITE}{stake:.2f} {currency}{C.RESET} {martingale.status_tag()}  "
-                f"{C.GREY}│{C.RESET} {stats.summary_line()}"
+                f"{C.GREY}│{C.RESET} Next Stake: {C.WHITE}{stake:.2f} {currency}{C.RESET} {martingale.status_tag()[0]}  "
+                f"{C.GREY}│{C.RESET} {stats.summary_line()[0]}"
             )
 
         # Store market data periodically
@@ -1627,8 +1639,8 @@ class TickStreakTracker:
                 tick_interval_ms=float(tick_freq[:-2]) if tick_freq != "N/A" else None,
                 data={
                     "stake": stake,
-                    "martingale_status": martingale.status_tag(),
-                    "summary": stats.summary_line(),
+                    "martingale_status": martingale.status_tag()[1],
+                    "summary": stats.summary_line()[1],
                 },
             )
 
@@ -2088,6 +2100,7 @@ async def run_worker(config, logger=None, worker_id=None):
             )
         except Exception as e:
             import traceback
+
             error_msg = f"Critical failure: {e}"
             logger.error(f"{C.RED}❌ {error_msg}{C.RESET}", exc_info=True)
             await event_manager.error_event(
