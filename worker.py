@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from core.auth import get_ws_url
 from disposables.client_experiment2 import DerivClient
 from typing import Dict, Any
+from redis_manager import redis_manager
 
 # worker.py - Add event storage function
 
@@ -788,7 +789,11 @@ class PersistentTradeManager:
 # ==================== TICK STREAK TRACKER ====================
 class TickStreakTracker:
     def __init__(
-        self, target_streak=4, max_allowed_latency_ms=350, signal_cooldown=1.0
+        self,
+        target_streak=4,
+        max_allowed_latency_ms=350,
+        signal_cooldown=1.0,
+        worker_id=None,
     ):
         self.prices = []
         self.timestamps = []
@@ -799,11 +804,14 @@ class TickStreakTracker:
         self.last_signal_time = 0
         self.signal_cooldown = signal_cooldown
         self.logger = None
+        self.worker_id = worker_id
 
     def set_logger(self, logger):
         self.logger = logger
 
-    def process_new_tick(self, price, server_epoch, martingale, stats, currency="USD"):
+    async def process_new_tick(
+        self, price, server_epoch, martingale, stats, currency="USD"
+    ):
         server_epoch_ms = int(server_epoch * 1000)
         local_time_ms = int(time.time() * 1000)
         latency = local_time_ms - server_epoch_ms
@@ -814,12 +822,30 @@ class TickStreakTracker:
                     f"🚨 {C.YELLOW}SYSTEM CLOCK OUT OF SYNC{C.RESET}: Your local time differs from the "
                     f"server by {C.BOLD}{latency/1000:.1f}s{C.RESET}."
                 )
+                await redis_manager.store_event(
+                    worker_id=self.worker_id,
+                    event_type="system_clock_out_of_sync",
+                    event_data={
+                        "type": "logline",
+                        "level": "error",
+                        "desc": f"SYSTEM CLOCK OUT OF SYNC. System time differs from the server by {latency/1000:.1f}s",
+                    },
+                )
             self.clock_drift_warning_triggered = True
 
         if latency > self.max_latency:
             if self.logger:
                 self.logger.warning(
                     f"{C.YELLOW}⚠️ Skipping tick ({C.ORANGE}High Latency: {latency}ms{C.RESET})"
+                )
+                await redis_manager.store_event(
+                    worker_id=self.worker_id,
+                    event_type="skipping_tick",
+                    event_data={
+                        "type": "logline",
+                        "level": "neutral",
+                        "desc": f"Skipping tick (High Latency: {latency}ms)",
+                    },
                 )
             return "SKIP_LATENCY"
 
@@ -869,6 +895,21 @@ class TickStreakTracker:
                 f"{C.GREY}│{C.RESET} Next Stake: {C.WHITE}{stake:.2f} {currency}{C.RESET} {martingale.status_tag()}  "
                 f"{C.GREY}│{C.RESET} {stats.summary_line()}"
             )
+            await redis_manager.store_event(
+                worker_id=self.worker_id,
+                event_type="status",
+                event_data={
+                    "type": "banner",
+                    "level": "info",
+                    "title": "Tick Analysis",
+                    "desc": f"{dir_color}●{C.RESET} Price: {C.WHITE}{C.BOLD}{price:.3f}{C.RESET}  "
+                    f"Streak: {dir_color}{self.streak:+d}{C.RESET} {direction_emoji} {streak_meter}  "
+                    f"{C.GREY}│{C.RESET} Latency: {latency_color}{latency}ms{C.RESET} "
+                    f"{C.GREY}({tick_freq}){C.RESET}  "
+                    f"{C.GREY}│{C.RESET} Next Stake: {C.WHITE}{stake:.2f} {currency}{C.RESET} {martingale.status_tag()}  "
+                    f"{C.GREY}│{C.RESET} {stats.summary_line()}",
+                },
+            )
 
         current_time = time.time()
         if current_time - self.last_signal_time < self.signal_cooldown:
@@ -910,7 +951,6 @@ async def print_banner(config, martingale, worker_id=None, logger=None):
 
     # Store banner event if we have worker_id and logger
     if worker_id:
-        from redis_manager import redis_manager
 
         event_data = {
             "message": "Banner displayed",
@@ -1029,12 +1069,34 @@ async def run_worker(config, logger=None, worker_id=None):
         )
     # ============ END OF ADDED CODE ============
 
+    # beginning of client stream data...
+    from redis_manager import redis_manager
+
     logger.info(
-        f"{C.GREY}🚀 Starting bot at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
+        f"{C.GREY}🚀 Starting worker {worker_id} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
+    )
+
+    await redis_manager.store_event(
+        worker_id=worker_id,
+        event_type="worker_booting",
+        event_data={
+            "type": "logline",
+            "level": "info",
+            "desc": f"Worker thread {worker_id} started at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}",
+        },
     )
 
     # Fetch balance
     logger.info(f"{C.CYAN}💰 Fetching live account balance...{C.RESET}")
+    await redis_manager.store_event(
+        worker_id=worker_id,
+        event_type="fetching_balance",
+        event_data={
+            "type": "logline",
+            "level": "info",
+            "desc": "Fetching live account balance...",
+        },
+    )
     try:
         balance_client = DerivClient(
             ws_url=get_ws_url(account_type=account_type, token=api_token, app_id=app_id)
@@ -1044,10 +1106,28 @@ async def run_worker(config, logger=None, worker_id=None):
         await balance_client.close()
     except Exception as e:
         logger.error(f"{C.RED}❌ Failed to fetch balance: {e}{C.RESET}")
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="fetching_balance_failed",
+            event_data={
+                "type": "logline",
+                "level": "error",
+                "desc": f"Failed to fetch balance: {e}.",
+            },
+        )
         return
 
     if initial_balance <= 0:
         logger.error(f"{C.RED}❌ Invalid or zero balance returned — aborting.{C.RESET}")
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="invalid_or_zero_balance_returned",
+            event_data={
+                "type": "logline",
+                "level": "error",
+                "desc": "Invalid or zero balance returned. Aborting...",
+            },
+        )
         return
 
     # Calculate base stake from balance percentage
@@ -1058,6 +1138,17 @@ async def run_worker(config, logger=None, worker_id=None):
             f"Resetting to absolute minimum {min_stake} {currency}... Please consider recharging your balance."
         )
         base_stake = min_stake
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="invalid_or_zero_balance_returned",
+            event_data={
+                "type": "banner",
+                "level": "warning",
+                "title": "Low Funds",
+                "desc": f"Calculated base stake from balance of {initial_balance} {currency} is {base_stake} {currency}. "
+                f"Resetting to absolute minimum {min_stake} {currency}... Please consider recharging your balance.",
+            },
+        )
 
     full_config = {
         "api_token": api_token,
@@ -1087,11 +1178,29 @@ async def run_worker(config, logger=None, worker_id=None):
     logger.info(
         f"{C.CYAN}📐 Base stake set to {initial_stake_percentage}% of balance: {C.BOLD}{base_stake} {currency}{C.RESET}"
     )
+    await redis_manager.store_event(
+        worker_id=worker_id,
+        event_type="base_stake_set",
+        event_data={
+            "type": "logline",
+            "level": "info",
+            "desc": f"Base stake set to {initial_stake_percentage}% of balance ({base_stake} {currency})",
+        },
+    )
 
     # Initialize components
     stats = SessionStats(initial_balance=initial_balance, currency=currency)
     logger.info(
         f"{C.GREY}💰 Starting Balance: {stats.initial_balance:.2f} {currency}{C.RESET}"
+    )
+    await redis_manager.store_event(
+        worker_id=worker_id,
+        event_type="base_stake_set",
+        event_data={
+            "type": "logline",
+            "level": "info",
+            "desc": f"Starting Balance: {stats.initial_balance:.2f} {currency}",
+        },
     )
 
     martingale = MartingaleManager(
@@ -1104,6 +1213,21 @@ async def run_worker(config, logger=None, worker_id=None):
     martingale.set_logger(logger)
 
     await print_banner(full_config, martingale, worker_id=worker_id)
+    await redis_manager.store_event(
+        worker_id=worker_id,
+        event_type="trade_kickoff",
+        event_data={
+            "type": "banner",
+            "level": "info",
+            "title": "Trade has kicked off",
+            "desc": {
+                "symbol": full_config.get("symbol"),
+                "base_stake": full_config.get("base_stake"),
+                "target_streak": full_config.get("target_streak"),
+                "stop_loss": round(stop_loss_percent / 100 * initial_balance, 2),
+            },
+        },
+    )
 
     trade_manager = PersistentTradeManager(full_config, logger, stats, martingale)
 
@@ -1132,6 +1256,7 @@ async def run_worker(config, logger=None, worker_id=None):
             target_streak=target_streak,
             max_allowed_latency_ms=max_latency_ms,
             signal_cooldown=signal_cooldown,
+            worker_id=worker_id,
         )
         tracker.set_logger(logger)
 
@@ -1139,6 +1264,30 @@ async def run_worker(config, logger=None, worker_id=None):
 
         logger.info(
             f"{C.CYAN}👁️ Now analyzing market... Awaiting {C.BOLD}{target_streak}{C.RESET} tick streak on {C.CYAN}{symbol}{C.RESET}."
+        )
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="tick_stream_subscription",
+            event_data={
+                "type": "banner",
+                "level": "info",
+                "title": "Subscribed to tick stream",
+                "desc": {
+                    "trading_connections_pre_connected": "Pre-connected trading connections",
+                    "trade_worker_started": "Trade worker has spawned.",
+                    "streaming_connection_established": "Streaming connection successfully established.",
+                    "tick_stream_subscribed": f"Subscribed to tick stream for {symbol}",
+                },
+            },
+        )
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="analyzing_market",
+            event_data={
+                "type": "logline",
+                "level": "info",
+                "desc": f"Now analyzing market... Awaiting {target_streak} tick streak on {symbol}.",
+            },
         )
 
         async for message_str in tick_client.ws:
@@ -1150,7 +1299,7 @@ async def run_worker(config, logger=None, worker_id=None):
                 epoch = float(tick_data.get("epoch"))
 
                 # Process tick and get live analysis output
-                signal = tracker.process_new_tick(
+                signal = await tracker.process_new_tick(
                     price, epoch, martingale, stats, currency
                 )
 
@@ -1164,6 +1313,17 @@ async def run_worker(config, logger=None, worker_id=None):
                         f"{C.YELLOW}🔥 Strike Streak Confirmed!{C.RESET} Triggering {sig_color}{C.BOLD}{signal}{C.RESET} order at price {C.WHITE}{price:.3f}{C.RESET}"
                     )
 
+                    await redis_manager.store_event(
+                        worker_id=worker_id,
+                        event_type="strike_streak_confirmed",
+                        event_data={
+                            "type": "banner",
+                            "level": "crimson",
+                            "title": "Streak Confirmed!",
+                            "desc": f"Strike Streak Confirmed! Triggering {signal} order at price {price:.3f}",
+                        },
+                    )
+
                     trade_manager.queue_trade(signal, symbol, currency)
                     last_signal_time = current_time
                     tracker.streak = 0
@@ -1172,11 +1332,38 @@ async def run_worker(config, logger=None, worker_id=None):
                 logger.error(
                     f"{C.RED}❌ WebSocket incoming error: {message['error'].get('message')}{C.RESET}"
                 )
+                await redis_manager.store_event(
+                    worker_id=worker_id,
+                    event_type="websocket_incoming_error",
+                    event_data={
+                        "type": "logline",
+                        "level": "error",
+                        "desc": f"WebSocket incoming error: {message['error'].get('message')}",
+                    },
+                )
 
     except asyncio.CancelledError:
         logger.info("Bot execution cancelled. Shutting down gracefully...")
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="bot_execution_cancelled",
+            event_data={
+                "type": "logline",
+                "level": "crimson",
+                "desc": "Bot execution cancelled. Shutting down gracefully...",
+            },
+        )
     except Exception as e:
         logger.error(f"{C.RED}❌ Critical failure: {e}{C.RESET}", exc_info=True)
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="bot_execution_cancelled",
+            event_data={
+                "type": "logline",
+                "level": "error",
+                "desc": f"Critical failure: {e}",
+            },
+        )
     finally:
         logger.info("Tearing down active connections...")
         logger.info(stats.detailed_summary())
@@ -1193,6 +1380,19 @@ async def run_worker(config, logger=None, worker_id=None):
         await trade_manager.close()
         logger.info(
             f"{C.GREY}🛑 Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{C.RESET}"
+        )
+        await redis_manager.store_event(
+            worker_id=worker_id,
+            event_type="final_words",
+            event_data={
+                "type": "banner",
+                "level": "crimson",
+                "title": "Final teardown",
+                "desc": {
+                    "teardown": "Active connections teared down",
+                    "worker_termination": f"Bot stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                },
+            },
         )
 
         return stats
