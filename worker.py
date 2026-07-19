@@ -449,27 +449,36 @@ class C:
 
 
 class ColorFormatter(logging.Formatter):
+    """Custom formatter with timestamp and colors"""
+
+    LEVEL_COLORS = {
+        logging.DEBUG: C.GREY,
+        logging.INFO: C.WHITE,
+        logging.WARNING: C.YELLOW,
+        logging.ERROR: C.RED,
+        logging.CRITICAL: C.RED + C.BOLD,
+    }
+
     def formatTime(self, record, datefmt=None):
+        """Format timestamp as HH:MM:SS.mmm"""
         ct = datetime.fromtimestamp(record.created)
-        if datefmt:
-            return ct.strftime(datefmt)
         return ct.strftime("%H:%M:%S.%f")[:-3]
 
     def format(self, record):
-        base_color = self.LEVEL_COLORS.get(record.levelno, C.WHITE)
-        timestamp = f"{C.GREY}{self.formatTime(record, '%H:%M:%S.%f')[:-3]}{C.RESET}"
-        level = f"{base_color}{record.levelname:<8}{C.RESET}"
+        """Format log record with timestamp and level"""
+        # Get timestamp
+        timestamp = f"{C.GREY}{self.formatTime(record)}{C.RESET}"
+
+        # Get level with color
+        level_color = self.LEVEL_COLORS.get(record.levelno, C.WHITE)
+        level = f"{level_color}{record.levelname:<8}{C.RESET}"
+
+        # Get message
         message = record.getMessage()
+
+        # Return formatted line
         return f"{timestamp} {level} {message}"
 
-
-ColorFormatter.LEVEL_COLORS = {
-    logging.DEBUG: C.GREY,
-    logging.INFO: C.WHITE,
-    logging.WARNING: C.YELLOW,
-    logging.ERROR: C.RED,
-    logging.CRITICAL: C.RED + C.BOLD,
-}
 
 # ==================== SESSION P&L TRACKER ====================
 
@@ -1726,11 +1735,20 @@ async def run_worker(config, logger=None, worker_id=None):
     """
     Main worker function that accepts all parameters via config dict.
     """
-    # Setup logging
+    # Setup logging with custom formatter
+    logger_name = f"DerivWorker_{config.get('symbol', 'R_100')}"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+
+    # Remove any existing handlers to avoid duplicates
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+
+    # Add custom handler with ColorFormatter
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(ColorFormatter())
-    logging.basicConfig(level=logging.INFO, handlers=[handler])
-    logger = logging.getLogger(f"DerivWorker_{config.get('symbol', 'R_100')}")
+    logger.addHandler(handler)
+    logger.propagate = False  # Prevent propagation to root logger
 
     # Extract config with defaults
     api_token = config.get("api_token")
