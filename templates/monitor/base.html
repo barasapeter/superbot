@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Worker Monitor{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <i class="fas fa-robot text-blue-600 text-2xl mr-3"></i>
+                    <h1 class="text-xl font-bold text-gray-800">Worker Monitor</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/monitor/" class="text-gray-600 hover:text-gray-900 transition-colors">
+                        <i class="fas fa-list mr-1"></i> Dashboard
+                    </a>
+                    <a href="/workers" class="text-gray-600 hover:text-gray-900 transition-colors">
+                        <i class="fas fa-cogs mr-1"></i> Workers
+                    </a>
+                    <a href="/health" class="text-gray-600 hover:text-gray-900 transition-colors">
+                        <i class="fas fa-heart mr-1"></i> Health
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <p class="text-center text-sm text-gray-500">
+                Worker Event Monitor &bull; Real-time worker monitoring
+            </p>
+        </div>
+    </footer>
+
+    <!-- Global JavaScript -->
+    <script>
+        // Utility functions for client-side use
+        function formatTimestampClient(timestamp) {
+            if (!timestamp) return 'N/A';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch {
+                return timestamp;
+            }
+        }
+
+        function getEventIconClient(type) {
+            const icons = {
+                'market_tick_analysis': 'fa-chart-line',
+                'trade_executed': 'fa-exchange-alt',
+                'trade_recorded': 'fa-check-circle',
+                'trade_resolved': 'fa-flag-checkered',
+                'trade_streak_confirmed': 'fa-bolt',
+                'system_heartbeat': 'fa-heartbeat',
+                'system_worker_start': 'fa-play',
+                'system_worker_booting': 'fa-cog',
+                'system_bot_cancelled': 'fa-stop',
+                'connection_streaming_connected': 'fa-plug',
+                'config_base_stake_set': 'fa-sliders-h',
+                'stats_updated': 'fa-chart-bar',
+                'stats_final_summary': 'fa-flag',
+                'martingale_prefetched': 'fa-dice',
+                'martingale_reset': 'fa-undo',
+                'worker_lifecycle': 'fa-sync',
+                'system_trade_kickoff': 'fa-rocket',
+                'system_trade_worker_started': 'fa-play-circle',
+                'connection_execution_ready': 'fa-handshake',
+                'connection_polling_ready': 'fa-plug',
+                'connection_tick_stream_subscribed': 'fa-rss',
+                'market_analyzing_market': 'fa-search'
+            };
+            return icons[type] || 'fa-circle';
+        }
+
+        function getEventColorClient(type) {
+            const colors = {
+                'market_tick_analysis': 'blue',
+                'trade_executed': 'green',
+                'trade_recorded': 'emerald',
+                'trade_resolved': 'purple',
+                'trade_streak_confirmed': 'yellow',
+                'system_heartbeat': 'gray',
+                'system_worker_start': 'green',
+                'system_worker_booting': 'blue',
+                'system_bot_cancelled': 'red',
+                'connection_streaming_connected': 'cyan',
+                'config_base_stake_set': 'orange',
+                'stats_updated': 'indigo',
+                'stats_final_summary': 'purple',
+                'martingale_prefetched': 'pink',
+                'martingale_reset': 'red',
+                'worker_lifecycle': 'gray'
+            };
+            return colors[type] || 'gray';
+        }
+
+        function truncateClient(str, length = 80) {
+            if (!str) return '';
+            if (str.length > length) {
+                return str.substring(0, length) + '...';
+            }
+            return str;
+        }
+    </script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,461 @@
+{% extends "monitor/base.html" %}
+
+{% block title %}Worker {{ worker_id[:8] }} - Worker Monitor{% endblock %}
+
+{% block extra_head %}
+<style>
+    .event-item {
+        transition: all 0.2s ease;
+        border-left: 3px solid transparent;
+    }
+    .event-item:hover {
+        background-color: #f9fafb;
+    }
+    .event-item.new {
+        animation: slideIn 0.3s ease;
+        border-left-color: #3b82f6;
+    }
+    .event-item.trade {
+        border-left-color: #10b981;
+    }
+    .event-item.system {
+        border-left-color: #6b7280;
+    }
+    .event-item.market {
+        border-left-color: #3b82f6;
+    }
+    .event-item.connection {
+        border-left-color: #06b6d4;
+    }
+    .event-item.config {
+        border-left-color: #f59e0b;
+    }
+    .event-item.stats {
+        border-left-color: #6366f1;
+    }
+    .event-item.martingale {
+        border-left-color: #ec4899;
+    }
+    
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateX(-10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    
+    #event-stream {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    #event-stream::-webkit-scrollbar {
+        width: 6px;
+    }
+    #event-stream::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+    }
+    #event-stream::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 3px;
+    }
+    #event-stream::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+    
+    .log-line {
+        font-family: 'Courier New', monospace;
+        font-size: 0.813rem;
+        padding: 2px 8px;
+        border-bottom: 1px solid #f3f4f6;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .log-line:hover {
+        background-color: #f9fafb;
+    }
+    
+    .stats-card {
+        transition: all 0.2s ease;
+    }
+    .stats-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    
+    .badge {
+        font-size: 0.7rem;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <div class="flex items-center space-x-3">
+                    <h2 class="text-2xl font-bold text-gray-800">
+                        <i class="fas fa-microchip mr-2"></i> {{ worker_id }}
+                    </h2>
+                    <span id="ws-status" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                        <i class="fas fa-circle text-yellow-500 text-xs mr-1"></i> Connecting...
+                    </span>
+                </div>
+                <div class="flex items-center space-x-4 mt-2">
+                    {% if is_running %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <i class="fas fa-play text-green-500 text-xs mr-1"></i> Running
+                    </span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        <i class="fas fa-stop text-red-500 text-xs mr-1"></i> Stopped
+                    </span>
+                    {% endif %}
+                    <span class="text-sm text-gray-500">
+                        Started: {{ state.started_at|formatTimestamp }}
+                    </span>
+                </div>
+            </div>
+            <div class="flex space-x-2 flex-wrap gap-2">
+                <button onclick="location.reload()" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-sync-alt mr-1"></i> Refresh
+                </button>
+                <a href="/monitor/" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-md transition-colors">
+                    <i class="fas fa-arrow-left mr-1"></i> Back
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <div class="text-sm text-gray-500">Total Events</div>
+            <div class="text-2xl font-bold text-gray-800" id="total-events">{{ total_events }}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <div class="text-sm text-gray-500">Event Types</div>
+            <div class="text-2xl font-bold text-gray-800">{{ event_types|length }}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <div class="text-sm text-gray-500">Categories</div>
+            <div class="text-2xl font-bold text-gray-800">{{ categories|length }}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <div class="text-sm text-gray-500">Latest Event</div>
+            <div class="text-sm font-medium text-gray-800 truncate">
+                {% if events %}
+                {{ events[0].type if events[0] else 'N/A' }}
+                {% else %}
+                No events
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration -->
+    {% if config %}
+    <div class="bg-white rounded-lg shadow p-6">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">
+            <i class="fas fa-cog mr-2"></i> Configuration
+        </h3>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+                <div class="text-sm text-gray-500">Symbol</div>
+                <div class="font-medium">{{ config.symbol or 'N/A' }}</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Currency</div>
+                <div class="font-medium">{{ config.currency or 'N/A' }}</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Target Streak</div>
+                <div class="font-medium">{{ config.target_streak or 'N/A' }}</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Martingale</div>
+                <div class="font-medium">{{ '✅ Enabled' if config.martingale_enabled else '❌ Disabled' }}</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Max Steps</div>
+                <div class="font-medium">{{ config.max_martingale_steps or 'N/A' }}</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Stop Loss</div>
+                <div class="font-medium">{{ config.stop_loss_percent or 'N/A' }}%</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Min Stake</div>
+                <div class="font-medium">{{ config.min_stake or 'N/A' }}</div>
+            </div>
+            <div>
+                <div class="text-sm text-gray-500">Heartbeat Interval</div>
+                <div class="font-medium">{{ config.heartbeat_interval or 'N/A' }}s</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Event Types & Categories -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% if event_types %}
+        <div class="bg-white rounded-lg shadow p-6">
+            <h4 class="text-sm font-medium text-gray-700 mb-3">Event Types</h4>
+            <div class="flex flex-wrap gap-2">
+                {% for type, count in event_types.items()|sort(attribute='1', reverse=True) %}
+                <span class="badge bg-blue-50 text-blue-700">
+                    {{ type }}: {{ count }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        {% if categories %}
+        <div class="bg-white rounded-lg shadow p-6">
+            <h4 class="text-sm font-medium text-gray-700 mb-3">Categories</h4>
+            <div class="flex flex-wrap gap-2">
+                {% for category, count in categories.items()|sort(attribute='1', reverse=True) %}
+                <span class="badge bg-purple-50 text-purple-700">
+                    {{ category }}: {{ count }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Live Event Stream -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2">
+            <h3 class="text-lg font-semibold text-gray-800">
+                <i class="fas fa-stream mr-2"></i> Live Event Stream
+            </h3>
+            <div class="flex items-center space-x-4">
+                <span class="text-sm text-gray-500" id="event-count">{{ total_events }} events</span>
+                <button onclick="clearEvents()" class="text-sm text-gray-400 hover:text-red-500 transition-colors">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+                <button onclick="toggleAutoScroll()" class="text-sm text-gray-400 hover:text-gray-600 transition-colors" id="auto-scroll-btn">
+                    <i class="fas fa-arrow-down"></i> Auto-scroll
+                </button>
+            </div>
+        </div>
+        <div id="event-stream" class="divide-y divide-gray-100">
+            {% for event in events %}
+            <div class="event-item px-6 py-3" data-event-id="{{ loop.index }}">
+                <div class="flex items-start justify-between">
+                    <div class="flex items-start space-x-3 flex-1 min-w-0">
+                        <i class="fas {{ event.type|getEventIcon }} text-{{ event.type|getEventColor }}-500 mt-1"></i>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-mono text-sm font-medium text-gray-800">{{ event.type }}</span>
+                                <span class="badge bg-gray-100 text-gray-600">
+                                    {{ event.display.category if event.display else event.data.category or 'unknown' }}
+                                </span>
+                            </div>
+                            <div class="text-sm text-gray-600 mt-1 truncate">
+                                {{ event.display.message if event.display else event.data.message or '' }}
+                            </div>
+                            <div class="text-xs text-gray-400 mt-1">
+                                {{ event.timestamp|formatTimestamp }}
+                            </div>
+                        </div>
+                    </div>
+                    {% if event.data %}
+                    <button onclick="toggleDetails(this)" class="ml-2 text-xs text-gray-400 hover:text-gray-600 flex-shrink-0">
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                    {% endif %}
+                </div>
+                {% if event.data %}
+                <div class="event-details hidden mt-2 pl-8">
+                    <pre class="bg-gray-50 p-3 rounded text-xs overflow-x-auto max-h-48">{{ event.data|tojson(indent=2) }}</pre>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Logs -->
+    {% if logs %}
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-800">
+                <i class="fas fa-terminal mr-2"></i> Recent Logs
+            </h3>
+        </div>
+        <div class="divide-y divide-gray-100 max-h-60 overflow-y-auto">
+            {% for log in logs %}
+            <div class="log-line">
+                <span class="text-xs text-gray-400">{{ log.timestamp|formatTimestamp }}</span>
+                <span class="text-xs font-semibold 
+                    {% if 'ERROR' in log.level %}text-red-600
+                    {% elif 'WARNING' in log.level %}text-yellow-600
+                    {% elif 'INFO' in log.level %}text-blue-600
+                    {% else %}text-gray-600{% endif %}">
+                    [{{ log.level }}]
+                </span>
+                <span class="text-sm text-gray-700">{{ log.message }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    let eventCount = {{ total_events }};
+    let autoScroll = true;
+    const workerId = '{{ worker_id }}';
+    const stream = document.getElementById('event-stream');
+    
+    function addEventToStream(event) {
+        const eventDiv = document.createElement('div');
+        eventDiv.className = 'event-item new px-6 py-3';
+        eventDiv.dataset.eventId = Date.now();
+        
+        const icon = event.display?.icon || getEventIconClient(event.type);
+        const color = event.display?.color || getEventColorClient(event.type);
+        const category = event.display?.category || event.data?.category || 'unknown';
+        const message = event.display?.message || event.data?.message || '';
+        const timestamp = formatTimestampClient(event.timestamp);
+        
+        eventDiv.innerHTML = `
+            <div class="flex items-start justify-between">
+                <div class="flex items-start space-x-3 flex-1 min-w-0">
+                    <i class="fas ${icon} text-${color}-500 mt-1"></i>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-mono text-sm font-medium text-gray-800">${event.type}</span>
+                            <span class="badge bg-gray-100 text-gray-600">${category}</span>
+                        </div>
+                        <div class="text-sm text-gray-600 mt-1 truncate">${truncateClient(message, 80)}</div>
+                        <div class="text-xs text-gray-400 mt-1">${timestamp}</div>
+                    </div>
+                </div>
+                ${event.data ? `<button onclick="toggleDetails(this)" class="ml-2 text-xs text-gray-400 hover:text-gray-600 flex-shrink-0"><i class="fas fa-chevron-down"></i></button>` : ''}
+            </div>
+            ${event.data ? `<div class="event-details hidden mt-2 pl-8"><pre class="bg-gray-50 p-3 rounded text-xs overflow-x-auto max-h-48">${JSON.stringify(event.data, null, 2)}</pre></div>` : ''}
+        `;
+        
+        // Insert at top
+        stream.insertBefore(eventDiv, stream.firstChild);
+        
+        // Limit events shown
+        while (stream.children.length > 200) {
+            stream.removeChild(stream.lastChild);
+        }
+        
+        // Update count
+        eventCount++;
+        document.getElementById('event-count').textContent = `${eventCount} events`;
+        document.getElementById('total-events').textContent = eventCount;
+        
+        // Auto-scroll to top if enabled
+        if (autoScroll) {
+            stream.scrollTop = 0;
+        }
+    }
+    
+    function toggleDetails(button) {
+        const details = button.closest('.event-item').querySelector('.event-details');
+        if (details) {
+            details.classList.toggle('hidden');
+            button.querySelector('i').classList.toggle('fa-chevron-down');
+            button.querySelector('i').classList.toggle('fa-chevron-up');
+        }
+    }
+    
+    function clearEvents() {
+        stream.innerHTML = '';
+        eventCount = 0;
+        document.getElementById('event-count').textContent = '0 events';
+        document.getElementById('total-events').textContent = '0';
+    }
+    
+    function toggleAutoScroll() {
+        autoScroll = !autoScroll;
+        const btn = document.getElementById('auto-scroll-btn');
+        if (autoScroll) {
+            btn.innerHTML = '<i class="fas fa-arrow-down"></i> Auto-scroll';
+            btn.className = 'text-sm text-gray-400 hover:text-gray-600 transition-colors';
+        } else {
+            btn.innerHTML = '<i class="fas fa-pause"></i> Paused';
+            btn.className = 'text-sm text-blue-600 hover:text-blue-700 transition-colors';
+        }
+    }
+    
+    // WebSocket connection
+    function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/monitor/ws/${workerId}`;
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = function() {
+            console.log('WebSocket connected');
+            document.getElementById('ws-status').innerHTML = 
+                '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">' +
+                '<i class="fas fa-circle text-green-500 text-xs mr-1"></i> Connected' +
+                '</span>';
+        };
+        
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'initial') {
+                console.log(`Initial load: ${data.events ? data.events.length : 0} events`);
+            } else if (data.type === 'new_event') {
+                addEventToStream(data.event);
+            } else if (data.type === 'new_log') {
+                // Handle new logs if needed
+                console.log('New log:', data.log);
+            } else if (data.type === 'error') {
+                console.error('WebSocket error:', data.message);
+            } else if (data.type === 'status_update') {
+                // Update status
+                const status = data.is_running ? 'Running' : 'Stopped';
+                console.log(`Worker status updated: ${status}`);
+            }
+        };
+        
+        ws.onerror = function(error) {
+            console.error('WebSocket error:', error);
+            document.getElementById('ws-status').innerHTML = 
+                '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">' +
+                '<i class="fas fa-circle text-red-500 text-xs mr-1"></i> Error' +
+                '</span>';
+        };
+        
+        ws.onclose = function() {
+            console.log('WebSocket disconnected, reconnecting in 3s...');
+            document.getElementById('ws-status').innerHTML = 
+                '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">' +
+                '<i class="fas fa-circle text-gray-500 text-xs mr-1"></i> Disconnected' +
+                '</span>';
+            setTimeout(connectWebSocket, 3000);
+        };
+        
+        return ws;
+    }
+    
+    // Initialize WebSocket
+    let ws = connectWebSocket();
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        if (ws) ws.close();
+    });
+</script>
+{% endblock %}

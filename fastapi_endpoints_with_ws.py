@@ -1,4 +1,3 @@
-# main_api.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 import uuid
@@ -6,11 +5,18 @@ from datetime import datetime
 import asyncio
 import json
 from typing import Optional
+import logging
 
 from persistent_worker import PersistentWorker, workers
 from redis_manager import redis_manager
 from ws_log_streaming import ws_manager, redis_log_listener
 from models import WorkerConfig, WorkerResponse
+
+# Add monitor router import
+from routers import monitor, websocket_monitor
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ==================== STARTUP/SHUTDOWN ====================
 
@@ -26,48 +32,73 @@ async def restore_workers():
         # Only restore running workers
         if status == "running":
             config = worker_state.get("config", {})
-            if config:
-                worker = PersistentWorker(worker_id, config)
-                workers[worker_id] = worker
-                await worker.start()
-                print(f"🔄 Restored worker {worker_id}")
+
+            # Handle config if it's a string (JSON)
+            if isinstance(config, str):
+                try:
+                    config = json.loads(config)
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse config for worker {worker_id}")
+                    continue
+
+            if config and isinstance(config, dict):
+                try:
+                    worker = PersistentWorker(worker_id, config)
+                    workers[worker_id] = worker
+                    await worker.start()
+                    logger.info(f"🔄 Restored worker {worker_id}")
+                except Exception as e:
+                    logger.error(f"Failed to restore worker {worker_id}: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ---- Startup ----
-    await redis_manager.connect()
+    logger.info("🚀 Starting server...")
 
-    # Start Redis listener in background
-    listener_task = asyncio.create_task(redis_log_listener())
+    # Connect to Redis
+    await redis_manager.connect()
+    logger.info("✅ Redis connected")
+
+    # Start Redis listener in background (if needed)
+    # listener_task = asyncio.create_task(redis_log_listener())
 
     # Restore workers from previous sessions
     await restore_workers()
 
-    print(f"🚀 Server started with {len(workers)} workers restored")
+    logger.info(f"🚀 Server started with {len(workers)} workers restored")
 
     try:
         yield
     finally:
         # ---- Shutdown ----
+        logger.info("🛑 Shutting down server...")
+
         # Stop all workers
         for worker_id in list(workers.keys()):
-            await workers[worker_id].stop()
+            try:
+                await workers[worker_id].stop()
+                logger.info(f"Stopped worker {worker_id}")
+            except Exception as e:
+                logger.error(f"Error stopping worker {worker_id}: {e}")
 
         # Cancel the Redis listener task
-        listener_task.cancel()
-        try:
-            await listener_task
-        except asyncio.CancelledError:
-            pass
+        # listener_task.cancel()
+        # try:
+        #     await listener_task
+        # except asyncio.CancelledError:
+        #     pass
 
         # Disconnect Redis
         await redis_manager.disconnect()
-        print("🛑 Server shutdown complete")
+        logger.info("🛑 Server shutdown complete")
 
 
 app = FastAPI(title="Persistent Trading Bot API", version="1.0", lifespan=lifespan)
 
+# Include monitor routers
+app.include_router(monitor.router)
+app.include_router(websocket_monitor.router)
 
 # ==================== WORKER MANAGEMENT ====================
 
@@ -82,7 +113,8 @@ async def start_worker(config: WorkerConfig):
         raise HTTPException(400, "Worker already exists")
 
     # Create and start worker
-    worker = PersistentWorker(worker_id, config.model_dump())
+    config_dict = config.model_dump()
+    worker = PersistentWorker(worker_id, config_dict)
     workers[worker_id] = worker
 
     await worker.start()
@@ -121,14 +153,20 @@ async def restart_worker(worker_id: str):
 
     # Get config and start again
     worker_state = await redis_manager.get_worker_state(worker_id)
-    if "config" in worker_state:
-        worker_state["config"] = json.loads(worker_state["config"])
 
-    if not worker_state or "config" not in worker_state:
+    # Handle config parsing
+    config = worker_state.get("config", {})
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            raise HTTPException(400, "Invalid worker config")
+
+    if not worker_state or not config:
         raise HTTPException(400, "Worker config not found")
 
     # Create new worker with same config
-    worker = PersistentWorker(worker_id, worker_state["config"])
+    worker = PersistentWorker(worker_id, config)
     workers[worker_id] = worker
     await worker.start()
 
@@ -145,8 +183,15 @@ async def list_workers():
     result = []
     for worker_id, worker in workers.items():
         state = await redis_manager.get_worker_state(worker_id)
-        if "config" in state:
-            state["config"] = json.loads(state["config"])
+        if state and "config" in state:
+            try:
+                state["config"] = (
+                    json.loads(state["config"])
+                    if isinstance(state["config"], str)
+                    else state["config"]
+                )
+            except:
+                pass
 
         result.append(
             {
@@ -166,8 +211,16 @@ async def get_worker_status(worker_id: str):
         raise HTTPException(404, f"Worker {worker_id} not found")
 
     state = await redis_manager.get_worker_state(worker_id)
-    if "config" in state:
-        state["config"] = json.loads(state["config"])
+    if state and "config" in state:
+        try:
+            state["config"] = (
+                json.loads(state["config"])
+                if isinstance(state["config"], str)
+                else state["config"]
+            )
+        except:
+            pass
+
     return {
         "worker_id": worker_id,
         "is_running": workers[worker_id].is_running,
@@ -183,9 +236,6 @@ async def get_worker_logs(worker_id: str, limit: int = 100):
 
     logs = await workers[worker_id].get_logs(limit)
     return {"worker_id": worker_id, "logs": logs, "count": len(logs)}
-
-
-# main_api.py - Add event endpoints
 
 
 @app.get("/workers/{worker_id}/events")
@@ -282,8 +332,16 @@ async def websocket_logs(websocket: WebSocket, worker_id: str):
 
         # Send current status
         state = await redis_manager.get_worker_state(worker_id)
-        if "config" in state:
-            state["config"] = json.loads(state["config"])
+        if state and "config" in state:
+            try:
+                state["config"] = (
+                    json.loads(state["config"])
+                    if isinstance(state["config"], str)
+                    else state["config"]
+                )
+            except:
+                pass
+
         await websocket.send_json(
             {"type": "status", "worker_id": worker_id, "data": state}
         )
@@ -297,8 +355,15 @@ async def websocket_logs(websocket: WebSocket, worker_id: str):
                     await websocket.send_text("pong")
                 elif data == "get_status":
                     state = await redis_manager.get_worker_state(worker_id)
-                    if "config" in state:
-                        state["config"] = json.loads(state["config"])
+                    if state and "config" in state:
+                        try:
+                            state["config"] = (
+                                json.loads(state["config"])
+                                if isinstance(state["config"], str)
+                                else state["config"]
+                            )
+                        except:
+                            pass
                     await websocket.send_json(
                         {"type": "status", "worker_id": worker_id, "data": state}
                     )
@@ -329,21 +394,22 @@ async def websocket_all_logs(websocket: WebSocket):
         while True:
             try:
                 # Listen for logs from Redis
-                message = await redis_manager.pubsub.get_message(
-                    timeout=1.0, ignore_subscribe_messages=True
-                )
+                if redis_manager.pubsub:
+                    message = await redis_manager.pubsub.get_message(
+                        timeout=1.0, ignore_subscribe_messages=True
+                    )
 
-                if message and message["type"] == "message":
-                    # Check if it's a log message
-                    channel = message["channel"]
-                    if channel.startswith("worker:") and channel.endswith(":logs"):
-                        try:
-                            log_entry = json.loads(message["data"])
-                            await websocket.send_json(
-                                {"type": "log", "data": log_entry}
-                            )
-                        except Exception:
-                            pass
+                    if message and message["type"] == "message":
+                        # Check if it's a log message
+                        channel = message["channel"]
+                        if channel.startswith("worker:") and channel.endswith(":logs"):
+                            try:
+                                log_entry = json.loads(message["data"])
+                                await websocket.send_json(
+                                    {"type": "log", "data": log_entry}
+                                )
+                            except Exception:
+                                pass
 
                 # Check for client messages
                 try:
@@ -386,4 +452,4 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8080, log_level="info")
