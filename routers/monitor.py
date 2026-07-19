@@ -29,6 +29,17 @@ def format_timestamp(value):
         return str(value)[:19] if value else "N/A"
 
 
+def format_number(value):
+    """Format number with commas and 2 decimal places"""
+    if value is None:
+        return "N/A"
+    try:
+        val = float(value)
+        return f"{val:,.2f}"
+    except (ValueError, TypeError):
+        return str(value)
+
+
 def get_event_icon(value):
     """Get icon for event type"""
     icons = {
@@ -54,6 +65,12 @@ def get_event_icon(value):
         "connection_polling_ready": "fa-plug",
         "connection_tick_stream_subscribed": "fa-rss",
         "market_analyzing_market": "fa-search",
+        "system_fetching_balance": "fa-spinner",
+        "config_banner_displayed": "fa-flag",
+        "stats_starting_balance": "fa-wallet",
+        "error_critical_failure": "fa-exclamation-triangle",
+        "error_fatal_error": "fa-skull",
+        "system_bot_stopped": "fa-stop-circle",
     }
     return icons.get(value, "fa-circle")
 
@@ -79,6 +96,12 @@ def get_event_color(value):
         "worker_lifecycle": "gray",
         "system_trade_kickoff": "amber",
         "system_trade_worker_started": "teal",
+        "system_fetching_balance": "blue",
+        "config_banner_displayed": "orange",
+        "stats_starting_balance": "cyan",
+        "error_critical_failure": "red",
+        "error_fatal_error": "red",
+        "system_bot_stopped": "gray",
     }
     return colors.get(value, "gray")
 
@@ -121,6 +144,9 @@ def get_event_badge(event_type):
         "config_banner_displayed": "bg-orange-100 text-orange-800",
         "stats_starting_balance": "bg-cyan-100 text-cyan-800",
         "worker_lifecycle": "bg-gray-100 text-gray-800",
+        "error_critical_failure": "bg-red-100 text-red-800",
+        "error_fatal_error": "bg-red-100 text-red-800",
+        "system_bot_stopped": "bg-gray-100 text-gray-800",
     }
     return badges.get(event_type, "bg-gray-100 text-gray-800")
 
@@ -147,8 +173,8 @@ def format_currency(value, currency="USD"):
     try:
         val = float(value)
         if val >= 0:
-            return f"+{val:.2f} {currency}"
-        return f"{val:.2f} {currency}"
+            return f"+{val:,.2f} {currency}"
+        return f"{val:,.2f} {currency}"
     except:
         return str(value)
 
@@ -177,8 +203,9 @@ def get_streak_color(streak):
         return "text-gray-500"
 
 
-# Register all filters
+# Register all filters - MAKE SURE formatNumber is registered
 templates.env.filters["formatTimestamp"] = format_timestamp
+templates.env.filters["formatNumber"] = format_number  # <-- This must be here
 templates.env.filters["getEventIcon"] = get_event_icon
 templates.env.filters["getEventColor"] = get_event_color
 templates.env.filters["truncate"] = truncate_text
@@ -189,6 +216,55 @@ templates.env.filters["getTradeResultBadge"] = get_trade_result_badge
 templates.env.filters["getStreakColor"] = get_streak_color
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
+
+
+def extract_latest_stats(events):
+    """Extract the latest stats from events history"""
+    pl = 0.0
+    balance = 0.0
+    win_rate = 0.0
+    total_trades = 0
+    wins = 0
+    losses = 0
+
+    # Find the latest stats_updated event (events are sorted newest first)
+    for event in events:
+        event_type = event.get("type", "")
+
+        if event_type == "stats_updated":
+            data = event.get("data", {})
+            if "net_pl" in data:
+                pl = float(data["net_pl"])
+            if "current_balance" in data:
+                balance = float(data["current_balance"])
+            if "win_rate" in data:
+                win_rate = float(data["win_rate"])
+            if "total_trades" in data:
+                total_trades = int(data["total_trades"])
+            if "wins" in data:
+                wins = int(data["wins"])
+            if "losses" in data:
+                losses = int(data["losses"])
+            # Found the latest stats, break
+            break
+
+        elif event_type == "stats_final_summary":
+            data = event.get("data", {})
+            if "net_pl" in data:
+                pl = float(data["net_pl"])
+            if "final_balance" in data:
+                balance = float(data["final_balance"])
+            if "win_rate" in data:
+                win_rate = float(data["win_rate"])
+            if "total_trades" in data:
+                total_trades = int(data["total_trades"])
+            if "wins" in data:
+                wins = int(data["wins"])
+            if "losses" in data:
+                losses = int(data["losses"])
+            break
+
+    return pl, balance, win_rate, total_trades, wins, losses
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -216,23 +292,14 @@ async def monitor_dashboard(request: Request):
             except:
                 pass
 
-        # Get latest events
-        latest_events = await redis_manager.get_events(worker_id, limit=5)
-        latest_event = latest_events[0] if latest_events else None
-
-        # Get current P/L
-        pl = 0
-        balance = 0
-        for event in latest_events:
-            if event.get("type") == "stats_updated":
-                data = event.get("data", {})
-                if "net_pl" in data:
-                    pl = data["net_pl"]
-                if "current_balance" in data:
-                    balance = data["current_balance"]
-                break
+        # Get events and extract stats
+        events = await redis_manager.get_events(worker_id, limit=200)
+        pl, balance, _, _, _, _ = extract_latest_stats(events)
 
         total_pl += pl
+
+        # Get latest event for display
+        latest_event = events[0] if events else None
 
         enhanced_workers.append(
             {
@@ -273,32 +340,25 @@ async def worker_detail(request: Request, worker_id: str):
     if not state:
         raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
 
-    # Get worker stats
+    # Get worker stats and events
     stats = await redis_manager.get_worker_stats(worker_id)
-    events = await redis_manager.get_worker_event_stream(worker_id, limit=200)
+
+    # Get events - we need enough to find the latest stats
+    events = await redis_manager.get_worker_event_stream(worker_id, limit=500)
     logs = await redis_manager.get_log_history(worker_id, limit=50)
 
     # Parse config
     config = stats.get("config", {})
 
-    # Get current P/L and stats
-    current_pl = 0
-    current_balance = 0
-    win_rate = 0
-    total_trades = 0
+    # Extract latest stats from events
+    current_pl, current_balance, win_rate, total_trades, wins, losses = (
+        extract_latest_stats(events)
+    )
 
-    # Get latest stats_updated event
-    stats_events = await redis_manager.get_events(worker_id, "stats_updated", limit=1)
-    if stats_events:
-        data = stats_events[0].get("data", {})
-        if "net_pl" in data:
-            current_pl = data["net_pl"]
-        if "current_balance" in data:
-            current_balance = data["current_balance"]
-        if "total_trades" in data:
-            total_trades = data["total_trades"]
-        if "win_rate" in data:
-            win_rate = data["win_rate"]
+    # Fallback: try to get from state if still zero
+    if current_balance == 0.0 and state:
+        if "initial_balance" in config:
+            current_balance = float(config.get("initial_balance", 0))
 
     # Get WebSocket URL
     ws_url = (
@@ -324,6 +384,8 @@ async def worker_detail(request: Request, worker_id: str):
             "current_balance": current_balance,
             "win_rate": win_rate,
             "total_trades": total_trades,
+            "wins": wins,
+            "losses": losses,
         },
     )
 
@@ -338,15 +400,8 @@ async def api_list_workers():
         worker_id = worker_state.get("worker_id")
         is_running = worker_id in workers and workers[worker_id].is_running
 
-        # Get latest P/L
-        stats_events = await redis_manager.get_events(
-            worker_id, "stats_updated", limit=1
-        )
-        pl = 0
-        if stats_events:
-            data = stats_events[0].get("data", {})
-            if "net_pl" in data:
-                pl = data["net_pl"]
+        events = await redis_manager.get_events(worker_id, limit=200)
+        pl, _, _, _, _, _ = extract_latest_stats(events)
 
         workers_list.append(
             {
@@ -393,7 +448,7 @@ async def api_get_worker_pnl(worker_id: str):
     if not state:
         raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
 
-    events = await redis_manager.get_events(worker_id, limit=100)
+    events = await redis_manager.get_events(worker_id, limit=200)
     pl_history = []
 
     for event in events:
@@ -403,14 +458,14 @@ async def api_get_worker_pnl(worker_id: str):
                 pl_history.append(
                     {
                         "timestamp": event.get("timestamp"),
-                        "net_pl": data["net_pl"],
-                        "total_trades": data.get("total_trades", 0),
-                        "win_rate": data.get("win_rate", 0),
+                        "net_pl": float(data["net_pl"]),
+                        "total_trades": int(data.get("total_trades", 0)),
+                        "win_rate": float(data.get("win_rate", 0)),
                     }
                 )
 
     return {
         "worker_id": worker_id,
-        "pl_history": pl_history[::-1],  # Oldest first for charting
+        "pl_history": pl_history[::-1],
         "current_pl": pl_history[-1]["net_pl"] if pl_history else 0,
     }
