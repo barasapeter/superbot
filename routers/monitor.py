@@ -321,9 +321,9 @@ async def monitor_dashboard(request: Request):
     enhanced_workers.sort(key=lambda x: x.get("started_at", ""), reverse=True)
 
     return templates.TemplateResponse(
-        "monitor/index.html",
-        {
-            "request": request,
+        request=request,
+        name="monitor/index.html",
+        context={
             "workers": enhanced_workers,
             "total_workers": len(enhanced_workers),
             "running_workers": sum(1 for w in enhanced_workers if w["is_running"]),
@@ -362,13 +362,13 @@ async def worker_detail(request: Request, worker_id: str):
 
     # Get WebSocket URL
     ws_url = (
-        f"ws://{request.headers.get('host', 'localhost:8080')}/monitor/ws/{worker_id}"
+        f"wss://{request.headers.get('host', 'localhost:8080')}/monitor/ws/{worker_id}"
     )
 
     return templates.TemplateResponse(
-        "monitor/worker_detail.html",
-        {
-            "request": request,
+        request=request,
+        name="monitor/worker_detail.html",
+        context={
             "worker_id": worker_id,
             "state": state,
             "config": config,
