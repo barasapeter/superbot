@@ -4,483 +4,471 @@
 
 {% block extra_head %}
 <style>
+    * {
+        box-sizing: border-box;
+    }
+    
     .event-item {
-        border-left: 4px solid transparent;
+        border-left: 3px solid transparent;
         position: relative;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        padding: 10px 16px;
+        background: white;
+        transition: none;
     }
-    .event-item:hover {
-        background-color: #f9fafb;
-        transform: translateX(4px);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    
+    .event-item:nth-child(even) {
+        background: #fafafa;
     }
-    .event-item.trade-won {
-        border-left-color: #10b981;
-    }
-    .event-item.trade-lost {
-        border-left-color: #ef4444;
-    }
-    .event-item.market {
-        border-left-color: #3b82f6;
-    }
-    .event-item.system {
-        border-left-color: #6b7280;
-    }
-    .event-item.martingale {
-        border-left-color: #ec4899;
-    }
-    .event-item.stats {
-        border-left-color: #8b5cf6;
-    }
-    .event-item.connection {
-        border-left-color: #06b6d4;
-    }
-    .event-item.error {
-        border-left-color: #ef4444;
-    }
+    
+    .event-item.trade-won { border-left-color: #10b981; }
+    .event-item.trade-lost { border-left-color: #ef4444; }
+    .event-item.market { border-left-color: #3b82f6; }
+    .event-item.system { border-left-color: #6b7280; }
+    .event-item.martingale { border-left-color: #ec4899; }
+    .event-item.stats { border-left-color: #8b5cf6; }
+    .event-item.connection { border-left-color: #06b6d4; }
+    .event-item.error { border-left-color: #ef4444; }
 
-    /* Smooth slide-in animation for new events */
     @keyframes slideIn {
         0% {
             opacity: 0;
-            transform: translateX(-30px) scale(0.96);
-            max-height: 0;
-            padding: 0 24px;
-            margin: 0;
-        }
-        60% {
-            opacity: 1;
-            transform: translateX(4px) scale(1.01);
+            transform: translateY(-8px);
         }
         100% {
             opacity: 1;
-            transform: translateX(0) scale(1);
-            max-height: 500px;
-            padding: 12px 24px;
-            margin: 0;
+            transform: translateY(0);
         }
     }
 
     .event-item.new-event {
-        animation: slideIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-        background: linear-gradient(90deg, rgba(59, 130, 246, 0.04) 0%, transparent 100%);
-        border-left-color: #3b82f6;
+        animation: slideIn 0.25s ease-out forwards;
+        background: #f8faff;
     }
 
-    .event-item.new-event.trade-won {
-        background: linear-gradient(90deg, rgba(16, 185, 129, 0.06) 0%, transparent 100%);
-        border-left-color: #10b981;
+    .event-item.new-event.trade-won { background: #f0fdf4; }
+    .event-item.new-event.trade-lost { background: #fef2f2; }
+    .event-item.new-event.stats { background: #f5f3ff; }
+    .event-item.new-event.martingale { background: #fdf2f8; }
+    .event-item.new-event.market { background: #eff6ff; }
+    .event-item.new-event.connection { background: #ecfeff; }
+
+    #event-stream {
+        max-height: 600px;
+        overflow-y: auto;
+        scroll-behavior: auto;
+    }
+    
+    #event-stream::-webkit-scrollbar {
+        width: 5px;
+    }
+    #event-stream::-webkit-scrollbar-track {
+        background: #f3f4f6;
+    }
+    #event-stream::-webkit-scrollbar-thumb {
+        background: #d1d5db;
+        border-radius: 3px;
+    }
+    #event-stream::-webkit-scrollbar-thumb:hover {
+        background: #9ca3af;
     }
 
-    .event-item.new-event.trade-lost {
-        background: linear-gradient(90deg, rgba(239, 68, 68, 0.06) 0%, transparent 100%);
-        border-left-color: #ef4444;
+    .stats-card {
+        background: white;
+        padding: 16px 20px;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        position: relative;
+    }
+    
+    .stats-card .icon-bg {
+        position: absolute;
+        right: 12px;
+        top: 12px;
+        font-size: 2.5rem;
+        opacity: 0.08;
+    }
+    
+    .stats-card .stat-label {
+        font-size: 0.75rem;
+        color: #6b7280;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    
+    .stats-card .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    
+    .stats-card .stat-sub {
+        font-size: 0.75rem;
+        color: #9ca3af;
+        margin-top: 4px;
     }
 
-    .event-item.new-event.stats {
-        background: linear-gradient(90deg, rgba(139, 92, 246, 0.06) 0%, transparent 100%);
-        border-left-color: #8b5cf6;
+    .badge {
+        font-size: 0.65rem;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        letter-spacing: 0.3px;
     }
+    
+    .badge-success { background: #d1fae5; color: #065f46; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .badge-info { background: #dbeafe; color: #1e40af; }
+    .badge-warning { background: #fef3c7; color: #92400e; }
+    .badge-gray { background: #f3f4f6; color: #4b5563; }
+    .badge-streak-positive { background: #d1fae5; color: #065f46; }
+    .badge-streak-negative { background: #fee2e2; color: #991b1b; }
 
-    .event-item.new-event.martingale {
-        background: linear-gradient(90deg, rgba(236, 72, 153, 0.06) 0%, transparent 100%);
-        border-left-color: #ec4899;
-    }
-
-    .event-item.new-event.market {
-        background: linear-gradient(90deg, rgba(59, 130, 246, 0.06) 0%, transparent 100%);
-        border-left-color: #3b82f6;
-    }
-
-    .event-item.new-event.connection {
-        background: linear-gradient(90deg, rgba(6, 182, 212, 0.06) 0%, transparent 100%);
-        border-left-color: #06b6d4;
-    }
-
-    /* Fade out animation for removal */
-    @keyframes fadeOut {
-        0% {
-            opacity: 1;
-            transform: translateX(0);
-            max-height: 500px;
-            padding: 12px 24px;
-            margin: 0;
-        }
-        100% {
-            opacity: 0;
-            transform: translateX(-20px);
-            max-height: 0;
-            padding: 0 24px;
-            margin: 0;
-        }
-    }
-
-    .event-item.removing {
-        animation: fadeOut 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-        overflow: hidden;
-    }
-
-    /* Toggle button styling */
     .toggle-btn {
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         width: 28px;
         height: 28px;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 50%;
+        border-radius: 6px;
         background: transparent;
-        border: none;
+        border: 1px solid transparent;
         cursor: pointer;
         flex-shrink: 0;
+        color: #9ca3af;
+        transition: none;
     }
-
+    
     .toggle-btn:hover {
         background: #f3f4f6;
-        transform: rotate(180deg) scale(1.1);
+        border-color: #e5e7eb;
+        color: #4b5563;
     }
-
+    
     .toggle-btn.active {
         transform: rotate(180deg);
     }
 
-    .toggle-btn.active:hover {
-        transform: rotate(180deg) scale(1.1);
-    }
-
-    /* Smooth expand/collapse for details */
     .event-details {
         max-height: 0;
         overflow: hidden;
-        transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, margin 0.3s ease;
         opacity: 0;
         margin-top: 0;
+        transition: none;
     }
-
+    
     .event-details.visible {
-        max-height: 500px;
+        max-height: 600px;
         opacity: 1;
         margin-top: 8px;
     }
-
+    
     .event-details pre {
-        transition: all 0.3s ease;
+        background: #f9fafb;
+        padding: 12px;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        overflow-x: auto;
+        border: 1px solid #e5e7eb;
+        color: #374151;
+        margin: 0;
     }
 
-    .event-details.visible pre {
-        opacity: 1;
-        transform: translateY(0);
-    }
-
-    .event-details pre {
-        opacity: 0;
-        transform: translateY(-10px);
-        transition: all 0.3s ease 0.1s;
-    }
-
-    #event-stream {
-        max-height: 600px;
-        overflow-y: auto;
-        scroll-behavior: smooth;
-    }
-    #event-stream::-webkit-scrollbar {
-        width: 6px;
-    }
-    #event-stream::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 3px;
-    }
-    #event-stream::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 3px;
-    }
-    #event-stream::-webkit-scrollbar-thumb:hover {
-        background: #555;
+    .trade-detail {
+        background: #f9fafb;
+        padding: 10px 14px;
+        border-radius: 6px;
+        border: 1px solid #e5e7eb;
+        margin-top: 6px;
     }
     
+    .trade-detail .grid-item {
+        font-size: 0.8rem;
+    }
+    
+    .trade-detail .label {
+        color: #6b7280;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    
+    .trade-detail .value {
+        font-weight: 600;
+        color: #111827;
+    }
+
+    .pl-positive { color: #10b981; }
+    .pl-negative { color: #ef4444; }
+    .streak-positive { color: #10b981; }
+    .streak-negative { color: #ef4444; }
+
+    .streak-bar-container {
+        width: 100%;
+        height: 6px;
+        background: #f3f4f6;
+        border-radius: 3px;
+        margin-top: 4px;
+        overflow: hidden;
+        position: relative;
+    }
+    
+    .streak-bar {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+        position: relative;
+    }
+    
+    .streak-bar.positive {
+        background: linear-gradient(90deg, #34d399, #10b981);
+    }
+    
+    .streak-bar.negative {
+        background: linear-gradient(90deg, #f87171, #ef4444);
+    }
+    
+    .streak-bar-label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        margin-left: 4px;
+    }
+
     .log-line {
         font-family: 'Courier New', monospace;
-        font-size: 0.813rem;
-        padding: 4px 12px;
+        font-size: 0.75rem;
+        padding: 4px 16px;
         border-bottom: 1px solid #f3f4f6;
         white-space: pre-wrap;
         word-break: break-all;
-        transition: background 0.2s ease;
     }
+    
     .log-line:hover {
-        background-color: #f9fafb;
-    }
-    
-    .stats-card {
-        cursor: default;
-        position: relative;
-        overflow: hidden;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .stats-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    }
-    .stats-card .icon-bg {
-        position: absolute;
-        right: -10px;
-        top: -10px;
-        font-size: 4rem;
-        opacity: 0.1;
-        transform: rotate(15deg);
-    }
-    
-    .badge {
-        font-size: 0.7rem;
-        padding: 2px 10px;
-        border-radius: 12px;
-        font-weight: 500;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        transition: all 0.2s ease;
-    }
-    
-    .trade-detail {
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin-top: 8px;
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        transition: all 0.2s ease;
-    }
-    
-    .trade-detail:hover {
-        background: #f1f5f9;
-        border-color: #cbd5e1;
-    }
-    
-    .pl-value.positive {
-        color: #10b981;
-    }
-    .pl-value.negative {
-        color: #ef4444;
-    }
-    
-    .stop-btn {
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .stop-btn:hover {
-        opacity: 0.9;
-        transform: scale(1.02);
-    }
-    .stop-btn:active {
-        transform: scale(0.95);
-    }
-
-    /* Pulsing dot for live status */
-    @keyframes pulse-dot {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
+        background: #f9fafb;
     }
 
     .status-dot {
-        animation: pulse-dot 2s ease-in-out infinite;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 4px;
+    }
+    
+    .status-dot.online { background: #10b981; }
+    .status-dot.offline { background: #ef4444; }
+    .status-dot.connecting { background: #f59e0b; }
+
+    .stop-btn {
+        padding: 6px 16px;
+        background: #ef4444;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: none;
+    }
+    
+    .stop-btn:hover { background: #dc2626; }
+    .stop-btn:disabled { 
+        background: #9ca3af; 
+        cursor: not-allowed;
+        opacity: 0.7;
     }
 
-    /* New event count badge */
-    .new-event-badge {
+    .util-btn {
+        padding: 6px 16px;
+        background: #f3f4f6;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: none;
+    }
+    
+    .util-btn:hover { 
+        background: #e5e7eb; 
+        border-color: #d1d5db;
+    }
+
+    .new-event-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         background: #3b82f6;
         color: white;
-        font-size: 0.6rem;
-        padding: 1px 8px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        padding: 2px 10px;
         border-radius: 12px;
-        animation: pulse-dot 2s ease-in-out infinite;
+        letter-spacing: 0.3px;
     }
 
     @media (max-width: 640px) {
-        .header-container {
-            flex-direction: column;
-            align-items: stretch !important;
-        }
-        .header-actions {
-            flex-wrap: wrap;
-            justify-content: center;
-            margin-top: 12px;
-        }
-        .header-actions > * {
-            flex: 1;
-            min-width: 80px;
-            text-align: center;
-        }
-        .stats-grid {
-            grid-template-columns: repeat(2, 1fr) !important;
-        }
-        .event-details pre {
-            font-size: 0.6rem !important;
-        }
-        .trade-detail .grid {
-            grid-template-columns: repeat(2, 1fr) !important;
-        }
-        .event-item {
-            padding-left: 12px !important;
-            padding-right: 12px !important;
-        }
+        .stats-card .stat-value { font-size: 1.25rem; }
+        .stats-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px; }
+        .stats-card { padding: 12px 14px; }
+        .event-item { padding: 8px 12px; }
+        .trade-detail .grid-item { font-size: 0.7rem; }
+        .event-details pre { font-size: 0.6rem; }
+        .header-actions .util-btn { padding: 4px 12px; font-size: 0.75rem; }
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <!-- Header -->
-    <div class="bg-white rounded-lg shadow p-4 sm:p-6">
-        <div class="flex flex-wrap items-start justify-between gap-4 header-container">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-microchip text-blue-600 text-lg sm:text-xl"></i>
+<div class="space-y-4">
+    <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-microchip text-blue-600"></i>
                 </div>
                 <div>
-                    <h2 class="text-lg sm:text-2xl font-bold text-gray-800">{{ worker_id }}</h2>
+                    <h2 class="text-xl font-bold text-gray-800">{{ worker_id }}</h2>
                     <div class="flex flex-wrap items-center gap-2 mt-1">
-                        <span id="ws-status" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                            <i class="fas fa-circle text-yellow-500 text-xs mr-1 status-dot"></i> Connecting...
+                        <span id="ws-status" class="text-xs font-medium text-gray-600">
+                            <span class="status-dot connecting"></span> Connecting...
                         </span>
-                        <span id="worker-status" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {% if is_running %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
-                            <i class="fas fa-circle text-{% if is_running %}green{% else %}red{% endif %}-500 text-xs mr-1 status-dot"></i>
+                        <span id="worker-status" class="text-xs font-medium {% if is_running %}text-green-600{% else %}text-red-600{% endif %}">
+                            <span class="status-dot {% if is_running %}online{% else %}offline{% endif %}"></span>
                             {% if is_running %}Running{% else %}Stopped{% endif %}
                         </span>
-                        <span class="text-xs text-gray-500">
-                            Started: {{ state.started_at }}
-                        </span>
+                        <span class="text-xs text-gray-400">Started: {{ state.started_at }}</span>
                     </div>
                 </div>
             </div>
             <div class="flex flex-wrap gap-2 header-actions">
                 {% if is_running %}
-                <button onclick="stopWorker()" id="stop-btn" class="stop-btn px-3 py-1.5 sm:px-4 sm:py-2 bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm font-medium rounded-md shadow-md">
+                <button onclick="stopWorker()" id="stop-btn" class="stop-btn">
                     <i class="fas fa-stop mr-1"></i> Stop
                 </button>
                 {% endif %}
-                <button onclick="location.reload()" class="px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs sm:text-sm font-medium rounded-md transition-all hover:scale-105">
+                <button onclick="location.reload()" class="util-btn">
                     <i class="fas fa-sync-alt mr-1"></i> Refresh
                 </button>
-                <a href="/monitor/" class="px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs sm:text-sm font-medium rounded-md transition-all hover:scale-105">
+                <a href="/monitor/" class="util-btn">
                     <i class="fas fa-arrow-left mr-1"></i> Back
                 </a>
             </div>
         </div>
     </div>
 
-    <!-- Stats Grid -->
-    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 stats-grid">
-        <div class="bg-white rounded-lg shadow p-3 sm:p-4 stats-card">
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 stats-grid">
+        <div class="stats-card">
             <i class="fas fa-dollar-sign icon-bg text-green-500"></i>
-            <div class="text-xs text-gray-500">Current P/L</div>
-            <div class="text-lg sm:text-2xl font-bold pl-value" id="current-pl">
-                {{ current_pl }}
-            </div>
-            <div class="text-xs text-gray-400 mt-1">{{ config.currency or 'USD' }}</div>
+            <div class="stat-label">Current P/L</div>
+            <div class="stat-value" id="current-pl">{{ current_pl }}</div>
+            <div class="stat-sub">{{ config.currency or 'USD' }}</div>
         </div>
         
-        <div class="bg-white rounded-lg shadow p-3 sm:p-4 stats-card">
+        <div class="stats-card">
             <i class="fas fa-wallet icon-bg text-blue-500"></i>
-            <div class="text-xs text-gray-500">Balance</div>
-            <div class="text-lg sm:text-2xl font-bold text-gray-800" id="current-balance">
-                {{ current_balance }}
-            </div>
-            <div class="text-xs text-gray-400 mt-1">{{ config.currency or 'USD' }}</div>
+            <div class="stat-label">Balance</div>
+            <div class="stat-value text-gray-800" id="current-balance">{{ current_balance }}</div>
+            <div class="stat-sub">{{ config.currency or 'USD' }}</div>
         </div>
         
-        <div class="bg-white rounded-lg shadow p-3 sm:p-4 stats-card">
+        <div class="stats-card">
             <i class="fas fa-trophy icon-bg text-yellow-500"></i>
-            <div class="text-xs text-gray-500">Win Rate</div>
-            <div class="text-lg sm:text-2xl font-bold text-gray-800" id="win-rate">{{ "%.1f"|format(win_rate) }}%</div>
-            <div class="text-xs text-gray-400 mt-1" id="wl-display">
+            <div class="stat-label">Win Rate</div>
+            <div class="stat-value text-gray-800" id="win-rate">{{ "%.1f"|format(win_rate) }}%</div>
+            <div class="stat-sub" id="wl-display">
                 <span class="text-green-600">{{ wins }}</span>W / <span class="text-red-600">{{ losses }}</span>L
             </div>
         </div>
         
-        <div class="bg-white rounded-lg shadow p-3 sm:p-4 stats-card">
+        <div class="stats-card">
             <i class="fas fa-calendar-alt icon-bg text-purple-500"></i>
-            <div class="text-xs text-gray-500">Total Events</div>
-            <div class="text-lg sm:text-2xl font-bold text-gray-800" id="total-events">{{ total_events }}</div>
-            <div class="text-xs text-gray-400 mt-1">{{ event_types|length }} types</div>
+            <div class="stat-label">Total Events</div>
+            <div class="stat-value text-gray-800" id="total-events">{{ total_events }}</div>
+            <div class="stat-sub">{{ event_types|length }} types</div>
         </div>
         
-        <div class="bg-white rounded-lg shadow p-3 sm:p-4 stats-card col-span-2 lg:col-span-1">
+        <div class="stats-card col-span-2 lg:col-span-1">
             <i class="fas fa-layer-group icon-bg text-pink-500"></i>
-            <div class="text-xs text-gray-500">Pending Trades</div>
-            <div class="text-lg sm:text-2xl font-bold text-gray-800" id="pending-trades">0</div>
-            <div class="text-xs text-gray-400 mt-1">Active contracts</div>
+            <div class="stat-label">Pending Trades</div>
+            <div class="stat-value text-gray-800" id="pending-trades">0</div>
+            <div class="stat-sub">Active contracts</div>
         </div>
     </div>
 
-    <!-- Configuration -->
     {% if config %}
-    <div class="bg-white rounded-lg shadow p-4 sm:p-6">
-        <h3 class="text-sm sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4">
+    <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">
             <i class="fas fa-cog mr-2"></i> Configuration
         </h3>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
-                <div class="text-xs text-gray-500">Symbol</div>
-                <div class="font-medium text-sm sm:text-base">{{ config.symbol or 'N/A' }}</div>
+                <div class="text-xs text-gray-500 uppercase tracking-wider">Symbol</div>
+                <div class="font-medium text-sm">{{ config.symbol or 'N/A' }}</div>
             </div>
             <div>
-                <div class="text-xs text-gray-500">Currency</div>
-                <div class="font-medium text-sm sm:text-base">{{ config.currency or 'N/A' }}</div>
+                <div class="text-xs text-gray-500 uppercase tracking-wider">Currency</div>
+                <div class="font-medium text-sm">{{ config.currency or 'N/A' }}</div>
             </div>
             <div>
-                <div class="text-xs text-gray-500">Target Streak</div>
-                <div class="font-medium text-sm sm:text-base">{{ config.target_streak or 'N/A' }}</div>
+                <div class="text-xs text-gray-500 uppercase tracking-wider">Target Streak</div>
+                <div class="font-medium text-sm">{{ config.target_streak or 'N/A' }}</div>
             </div>
             <div>
-                <div class="text-xs text-gray-500">Martingale</div>
-                <div class="font-medium text-sm sm:text-base">{{ 'Enabled' if config.martingale_enabled else 'Disabled' }}</div>
+                <div class="text-xs text-gray-500 uppercase tracking-wider">Martingale</div>
+                <div class="font-medium text-sm">{{ 'Enabled' if config.martingale_enabled else 'Disabled' }}</div>
             </div>
         </div>
     </div>
     {% endif %}
 
-    <!-- Live Event Stream -->
-    <div class="bg-white rounded-lg shadow">
-        <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2">
-            <h3 class="text-sm sm:text-lg font-semibold text-gray-800">
-                <i class="fas fa-stream mr-2"></i> Live Event Stream
-                <span id="new-event-indicator" class="hidden ml-2 text-xs text-blue-600 font-normal">
-                    <span class="new-event-badge">● New</span>
+    <div class="bg-white rounded-lg border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2">
+            <div class="flex items-center gap-3">
+                <h3 class="text-sm font-semibold text-gray-700">
+                    <i class="fas fa-stream mr-2"></i> Live Events
+                </h3>
+                <span id="new-event-indicator" class="hidden new-event-indicator">
+                    <i class="fas fa-circle text-xs"></i> New
                 </span>
-            </h3>
-            <div class="flex items-center space-x-3 sm:space-x-4">
-                <span class="text-xs sm:text-sm text-gray-500" id="event-count">{{ total_events }} events</span>
-                <button onclick="clearEvents()" class="text-xs sm:text-sm text-gray-400 hover:text-red-500 transition-colors">
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-sm text-gray-500" id="event-count">{{ total_events }} events</span>
+                <button onclick="clearEvents()" class="text-sm text-gray-400 hover:text-gray-600" title="Clear events">
                     <i class="fas fa-trash-alt"></i>
                 </button>
-                <button onclick="toggleAutoScroll()" class="text-xs sm:text-sm text-gray-400 hover:text-gray-600 transition-colors" id="auto-scroll-btn">
-                    <i class="fas fa-arrow-down"></i> Auto
+                <button onclick="toggleAutoScroll()" class="text-sm text-gray-500 hover:text-gray-700" id="auto-scroll-btn">
+                    <i class="fas fa-arrow-down mr-1"></i> Auto
                 </button>
             </div>
         </div>
-        <div id="event-stream" class="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
-            <!-- Events will be rendered by JavaScript -->
-        </div>
+        <div id="event-stream" class="divide-y divide-gray-100 max-h-[500px] overflow-y-auto"></div>
     </div>
 
-    <!-- Logs -->
     {% if logs %}
-    <div class="bg-white rounded-lg shadow">
-        <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
-            <h3 class="text-sm sm:text-lg font-semibold text-gray-800">
+    <div class="bg-white rounded-lg border border-gray-200">
+        <div class="px-4 py-3 border-b border-gray-200">
+            <h3 class="text-sm font-semibold text-gray-700">
                 <i class="fas fa-terminal mr-2"></i> Recent Logs
             </h3>
         </div>
-        <div class="divide-y divide-gray-100 max-h-40 sm:max-h-60 overflow-y-auto">
+        <div class="max-h-60 overflow-y-auto">
             {% for log in logs %}
-            <div class="log-line text-xs sm:text-sm">
-                <span class="text-xs text-gray-400">{{ log.timestamp }}</span>
-                <span class="text-xs font-semibold 
+            <div class="log-line">
+                <span class="text-gray-400">{{ log.timestamp }}</span>
+                <span class="font-semibold 
                     {% if 'ERROR' in log.level %}text-red-600
                     {% elif 'WARNING' in log.level %}text-yellow-600
                     {% elif 'INFO' in log.level %}text-blue-600
                     {% else %}text-gray-600{% endif %}">
                     [{{ log.level }}]
                 </span>
-                <span class="text-gray-700">{{ log.message }}</span>
+                <span>{{ log.message }}</span>
             </div>
             {% endfor %}
         </div>
@@ -489,515 +477,528 @@
 </div>
 
 <script>
-    // Utility functions
-    function formatNumber(num) {
-        if (num === undefined || num === null || isNaN(num)) return '0.00';
-        return Number(num).toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        });
-    }
-
-    function formatTimestampClient(timestamp) {
-        if (!timestamp) return 'N/A';
-        try {
-            const date = new Date(timestamp);
-            return date.toLocaleString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
+    (function() {
+        const workerId = '{{ worker_id }}';
+        const isRunning = {{ is_running|lower }};
+        
+        function fmt(n) {
+            if (n === undefined || n === null || isNaN(n)) return '0.00';
+            return Number(n).toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
             });
-        } catch {
-            return timestamp;
         }
-    }
 
-    function getEventIconClient(type) {
-        const icons = {
-            'market_tick_analysis': 'fa-chart-line',
-            'trade_executed': 'fa-exchange-alt',
-            'trade_recorded': 'fa-check-circle',
-            'trade_resolved': 'fa-flag-checkered',
-            'trade_streak_confirmed': 'fa-bolt',
-            'system_heartbeat': 'fa-heartbeat',
-            'system_worker_start': 'fa-play',
-            'system_worker_booting': 'fa-cog',
-            'system_bot_cancelled': 'fa-stop',
-            'connection_streaming_connected': 'fa-plug',
-            'config_base_stake_set': 'fa-sliders-h',
-            'stats_updated': 'fa-chart-bar',
-            'stats_final_summary': 'fa-flag',
-            'martingale_prefetched': 'fa-dice',
-            'martingale_reset': 'fa-undo',
-            'worker_lifecycle': 'fa-sync',
-            'system_trade_kickoff': 'fa-rocket',
-            'system_trade_worker_started': 'fa-play-circle',
-            'connection_execution_ready': 'fa-handshake',
-            'connection_polling_ready': 'fa-plug',
-            'connection_tick_stream_subscribed': 'fa-rss',
-            'market_analyzing_market': 'fa-search'
-        };
-        return icons[type] || 'fa-circle';
-    }
+        function fmtTime(ts) {
+            if (!ts) return 'N/A';
+            try {
+                return new Date(ts).toLocaleString('en-US', {
+                    month: 'short',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch { return ts; }
+        }
 
-    function getEventColorClient(type) {
-        const colors = {
-            'market_tick_analysis': 'blue',
-            'trade_executed': 'green',
-            'trade_recorded': 'emerald',
-            'trade_resolved': 'purple',
-            'trade_streak_confirmed': 'yellow',
-            'system_heartbeat': 'gray',
-            'system_worker_start': 'green',
-            'system_worker_booting': 'blue',
-            'system_bot_cancelled': 'red',
-            'connection_streaming_connected': 'cyan',
-            'config_base_stake_set': 'orange',
-            'stats_updated': 'indigo',
-            'stats_final_summary': 'purple',
-            'martingale_prefetched': 'pink',
-            'martingale_reset': 'red',
-            'worker_lifecycle': 'gray'
-        };
-        return colors[type] || 'gray';
-    }
+        function getIcon(type) {
+            const map = {
+                'market_tick_analysis': 'fa-chart-line',
+                'trade_executed': 'fa-exchange-alt',
+                'trade_recorded': 'fa-check-circle',
+                'trade_resolved': 'fa-flag-checkered',
+                'trade_streak_confirmed': 'fa-bolt',
+                'system_heartbeat': 'fa-heartbeat',
+                'system_worker_start': 'fa-play',
+                'system_worker_booting': 'fa-cog',
+                'system_bot_cancelled': 'fa-stop',
+                'connection_streaming_connected': 'fa-plug',
+                'config_base_stake_set': 'fa-sliders-h',
+                'stats_updated': 'fa-chart-bar',
+                'stats_final_summary': 'fa-flag',
+                'martingale_prefetched': 'fa-dice',
+                'martingale_reset': 'fa-undo',
+                'worker_lifecycle': 'fa-sync',
+                'system_trade_kickoff': 'fa-rocket'
+            };
+            return map[type] || 'fa-circle';
+        }
 
-    // Initial data from server
-    const initialEvents = {{ events|tojson }};
-    const initialTotalEvents = {{ total_events }};
-    let eventCount = initialTotalEvents;
-    let autoScroll = true;
-    const workerId = '{{ worker_id }}';
-    const stream = document.getElementById('event-stream');
-    let currentPl = {{ current_pl }};
-    let currentBalance = {{ current_balance }};
-    let currentWins = {{ wins }};
-    let currentLosses = {{ losses }};
-    let isRunning = {{ is_running|lower }};
-    let pendingTrades = 0;
-    let newEventCount = 0;
+        function getColor(type) {
+            const map = {
+                'market_tick_analysis': 'blue',
+                'trade_executed': 'green',
+                'trade_recorded': 'emerald',
+                'trade_resolved': 'purple',
+                'trade_streak_confirmed': 'yellow',
+                'system_heartbeat': 'gray',
+                'system_worker_start': 'green',
+                'system_worker_booting': 'blue',
+                'system_bot_cancelled': 'red',
+                'connection_streaming_connected': 'cyan',
+                'config_base_stake_set': 'orange',
+                'stats_updated': 'indigo',
+                'stats_final_summary': 'purple',
+                'martingale_prefetched': 'pink',
+                'martingale_reset': 'red',
+                'worker_lifecycle': 'gray'
+            };
+            return map[type] || 'gray';
+        }
 
-    // Render initial events
-    function renderEvents(events) {
-        stream.innerHTML = '';
-        events.forEach(event => {
-            addEventToStream(event, false);
-        });
-        document.getElementById('event-count').textContent = `${eventCount} events`;
-        document.getElementById('total-events').textContent = eventCount;
-        updatePL(currentPl);
-        document.getElementById('current-balance').textContent = formatNumber(currentBalance);
-    }
-
-    function addEventToStream(event, isNew = true) {
-        const eventDiv = document.createElement('div');
-        let className = 'event-item px-4 sm:px-6 py-3 sm:py-4';
-        
-        if (event.type === 'trade_recorded') {
-            if (event.data.result === 'WON') {
-                className += ' trade-won';
-            } else if (event.data.result === 'LOST') {
-                className += ' trade-lost';
+        function getBadge(event) {
+            if (event.type === 'trade_recorded') {
+                return `<span class="badge ${event.data.result === 'WON' ? 'badge-success' : 'badge-danger'}">
+                    <i class="fas ${event.data.result === 'WON' ? 'fa-check' : 'fa-times'}"></i> ${event.data.result}
+                </span>`;
             }
-        } else if (event.type === 'market_tick_analysis') {
-            className += ' market';
-        } else if (event.type === 'system_heartbeat') {
-            className += ' system';
-        } else if (event.type && event.type.includes('martingale')) {
-            className += ' martingale';
-        } else if (event.type && event.type.includes('stats')) {
-            className += ' stats';
-        } else if (event.type && event.type.includes('connection')) {
-            className += ' connection';
-        } else if (event.type && event.type.includes('error')) {
-            className += ' error';
+            if (event.type === 'trade_executed') {
+                return `<span class="badge badge-info">
+                    <i class="fas fa-arrow-${event.data.signal === 'CALL' ? 'up' : 'down'}"></i> ${event.data.signal}
+                </span>`;
+            }
+            return '';
         }
-        
-        // Add new-event class for animation
-        if (isNew) {
-            className += ' new-event';
-        }
-        
-        eventDiv.className = className;
-        eventDiv.dataset.eventId = Date.now();
-        
-        const icon = getEventIconClient(event.type);
-        const color = getEventColorClient(event.type);
-        const category = event.data?.category || 'unknown';
-        const timestamp = formatTimestampClient(event.timestamp);
-        
-        let widgetHtml = '';
-        
-        if (event.type === 'trade_recorded') {
-            const profit = event.data.profit || 0;
-            const profitClass = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : '');
-            const stake = event.data.stake || 0;
-            const tradeNumber = event.data.data?.trade_number || 'N/A';
-            widgetHtml = `
-                <div class="trade-detail mt-1 sm:mt-2 p-2 sm:p-3">
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-1 sm:gap-2 text-xs sm:text-sm">
-                        <div><span class="text-gray-500">Trade #</span> <span class="font-medium">${tradeNumber}</span></div>
-                        <div><span class="text-gray-500">Signal</span> <span class="font-medium ${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</span></div>
-                        <div><span class="text-gray-500">Stake</span> <span class="font-medium">${formatNumber(stake)}</span></div>
-                        <div><span class="text-gray-500">Profit</span> <span class="font-bold pl-value ${profitClass}">${profit > 0 ? '+' : ''}${formatNumber(profit)}</span></div>
+
+        function renderStreakBar(streak) {
+            const maxStreak = 4;
+            const absStreak = Math.min(Math.abs(streak), maxStreak);
+            const percentage = (absStreak / maxStreak) * 100;
+            const isPositive = streak > 0;
+            const colorClass = isPositive ? 'positive' : 'negative';
+            const labelClass = isPositive ? 'streak-positive' : 'streak-negative';
+            const sign = isPositive ? '+' : '';
+            
+            return `
+                <div class="flex items-center gap-2">
+                    <span class="${labelClass} font-bold">${sign}${streak}</span>
+                    <div class="streak-bar-container flex-1">
+                        <div class="streak-bar ${colorClass}" style="width: ${percentage}%"></div>
                     </div>
                 </div>
             `;
-        } else if (event.type === 'trade_executed') {
-            const stake = event.data.stake || 0;
-            const entry = event.data.entry_price || 0;
-            widgetHtml = `
-                <div class="mt-1 sm:mt-2 flex flex-wrap gap-2 text-xs sm:text-sm bg-blue-50 p-2 rounded">
-                    <span><span class="text-gray-500">Signal:</span> <strong class="${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</strong></span>
-                    <span><span class="text-gray-500">Stake:</span> <strong>${formatNumber(stake)}</strong></span>
-                    <span><span class="text-gray-500">Entry:</span> <strong>${entry.toFixed(2)}</strong></span>
-                </div>
-            `;
-        } else if (event.type === 'market_tick_analysis') {
-            const streak = event.data.streak || 0;
-            const streakClass = streak > 0 ? 'text-green-600' : (streak < 0 ? 'text-red-600' : '');
-            const price = event.data.price || 0;
-            const stake = event.data.data?.stake || 0;
-            widgetHtml = `
-                <div class="mt-1 sm:mt-2 flex flex-wrap gap-2 text-xs sm:text-sm bg-indigo-50 p-2 rounded">
-                    <span><span class="text-gray-500">Price:</span> <strong>${price.toFixed(2)}</strong></span>
-                    <span><span class="text-gray-500">Streak:</span> <strong class="${streakClass}">${streak}</strong></span>
-                    <span><span class="text-gray-500">Stake:</span> <strong>${formatNumber(stake)}</strong></span>
-                </div>
-            `;
-        } else if (event.type === 'stats_updated') {
-            const data = event.data.data || {};
-            const netPl = data.net_pl || 0;
-            const plClass = netPl > 0 ? 'positive' : (netPl < 0 ? 'negative' : '');
-            widgetHtml = `
-                <div class="mt-1 sm:mt-2 flex flex-wrap gap-2 text-xs sm:text-sm bg-purple-50 p-2 rounded">
-                    <span><span class="text-gray-500">Trades:</span> <strong>${data.total_trades || 0}</strong></span>
-                    <span><span class="text-gray-500">Wins:</span> <strong class="text-green-600">${data.wins || 0}</strong></span>
-                    <span><span class="text-gray-500">Losses:</span> <strong class="text-red-600">${data.losses || 0}</strong></span>
-                    <span><span class="text-gray-500">Win Rate:</span> <strong>${(data.win_rate || 0).toFixed(1)}%</strong></span>
-                    <span><span class="text-gray-500">Net P/L:</span> <strong class="pl-value ${plClass}">${netPl > 0 ? '+' : ''}${formatNumber(netPl)}</strong></span>
-                </div>
-            `;
-        } else if (event.type && event.type.includes('martingale')) {
-            const data = event.data.data || {};
-            const step = data.step || 0;
-            const maxSteps = data.max_steps || 0;
-            const stake = data.stake || 0;
-            widgetHtml = `
-                <div class="mt-1 sm:mt-2 flex flex-wrap gap-2 text-xs sm:text-sm bg-pink-50 p-2 rounded">
-                    <span><span class="text-gray-500">Step:</span> <strong>${step}/${maxSteps}</strong></span>
-                    <span><span class="text-gray-500">Stake:</span> <strong>${formatNumber(stake)}</strong></span>
-                    ${data.loss_streak ? `<span><span class="text-gray-500">Loss Streak:</span> <strong>${data.loss_streak}</strong></span>` : ''}
-                </div>
-            `;
-        } else if (event.type === 'trade_streak_confirmed') {
-            const entry = event.data.entry_price || 0;
-            widgetHtml = `
-                <div class="mt-1 sm:mt-2 flex flex-wrap gap-2 text-xs sm:text-sm bg-yellow-50 p-2 rounded">
-                    <span><span class="text-gray-500">Signal:</span> <strong class="${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</strong></span>
-                    <span><span class="text-gray-500">Entry:</span> <strong>${entry.toFixed(2)}</strong></span>
-                </div>
-            `;
-        } else if (event.type === 'system_heartbeat') {
-            const count = event.data.data?.heartbeat_count || 'N/A';
-            widgetHtml = `
-                <div class="mt-1 text-xs text-gray-400">
-                    Heartbeat #${count}
-                </div>
-            `;
         }
-        
-        // Generate a unique ID for the toggle button
-        const toggleId = `toggle-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-        const detailsId = `details-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-        
-        eventDiv.innerHTML = `
-            <div class="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3">
-                <div class="flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center bg-gray-100">
-                    <i class="fas ${icon} text-${color}-500 text-sm sm:text-base"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex flex-wrap items-center gap-1 sm:gap-2">
-                        <span class="font-mono text-xs sm:text-sm font-bold text-gray-800">${event.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                        <span class="badge bg-gray-100 text-gray-600 text-xs">${category}</span>
-                        ${event.type === 'trade_recorded' ? `<span class="badge ${event.data.result === 'WON' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} text-xs"><i class="fas ${event.data.result === 'WON' ? 'fa-check-circle' : 'fa-times-circle'}"></i> ${event.data.result}</span>` : ''}
-                        ${event.type === 'trade_executed' ? `<span class="badge bg-blue-100 text-blue-800 text-xs"><i class="fas fa-arrow-${event.data.signal === 'CALL' ? 'up' : 'down'}"></i> ${event.data.signal}</span>` : ''}
+
+        const initialEvents = {{ events|tojson }};
+        let eventCount = {{ total_events }};
+        let autoScroll = true;
+        const stream = document.getElementById('event-stream');
+        let currentPl = {{ current_pl }};
+        let currentBalance = {{ current_balance }};
+        let currentWins = {{ wins }};
+        let currentLosses = {{ losses }};
+        let pendingTrades = 0;
+        let indicatorTimeout = null;
+        let ws = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 5;
+        let reconnectTimer = null;
+
+        function renderEvents(events) {
+            stream.innerHTML = '';
+            events.forEach(e => addEventToStream(e, false));
+            updateCounts();
+        }
+
+        function addEventToStream(event, isNew = true) {
+            const div = document.createElement('div');
+            let cls = 'event-item';
+            
+            if (event.type === 'trade_recorded') {
+                cls += event.data.result === 'WON' ? ' trade-won' : ' trade-lost';
+            } else if (event.type === 'market_tick_analysis') {
+                cls += ' market';
+            } else if (event.type === 'system_heartbeat' || event.type === 'system_worker_start' || event.type === 'system_worker_booting' || event.type === 'system_bot_cancelled') {
+                cls += ' system';
+            } else if (event.type && event.type.includes('martingale')) {
+                cls += ' martingale';
+            } else if (event.type && event.type.includes('stats')) {
+                cls += ' stats';
+            } else if (event.type && event.type.includes('connection')) {
+                cls += ' connection';
+            } else if (event.type && event.type.includes('error')) {
+                cls += ' error';
+            }
+            
+            if (isNew) cls += ' new-event';
+            div.className = cls;
+            
+            const icon = getIcon(event.type);
+            const color = getColor(event.type);
+            const category = event.data?.category || 'unknown';
+            const time = fmtTime(event.timestamp);
+            const label = event.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const badge = getBadge(event);
+            const toggleId = `t-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+            const detailsId = `d-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+            
+            let widget = '';
+            if (event.type === 'trade_recorded') {
+                const p = event.data.profit || 0;
+                const pCls = p > 0 ? 'pl-positive' : (p < 0 ? 'pl-negative' : '');
+                widget = `
+                    <div class="trade-detail">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div><span class="label">Trade #</span><div class="value">${event.data.data?.trade_number || 'N/A'}</div></div>
+                            <div><span class="label">Signal</span><div class="value ${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</div></div>
+                            <div><span class="label">Stake</span><div class="value">${fmt(event.data.stake)}</div></div>
+                            <div><span class="label">Profit</span><div class="value ${pCls}">${p > 0 ? '+' : ''}${fmt(p)}</div></div>
+                        </div>
                     </div>
-                    ${widgetHtml}
-                    <div class="text-xs text-gray-400 mt-1 sm:mt-2">
-                        <i class="far fa-clock mr-1"></i> ${timestamp}
+                `;
+            } else if (event.type === 'trade_executed') {
+                widget = `
+                    <div class="trade-detail">
+                        <div class="grid grid-cols-3 gap-2">
+                            <div><span class="label">Signal</span><div class="value ${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</div></div>
+                            <div><span class="label">Stake</span><div class="value">${fmt(event.data.stake)}</div></div>
+                            <div><span class="label">Entry</span><div class="value">${(event.data.entry_price || 0).toFixed(2)}</div></div>
+                        </div>
                     </div>
+                `;
+            } else if (event.type === 'market_tick_analysis') {
+                const streak = event.data.streak || 0;
+                const sCls = streak > 0 ? 'streak-positive' : (streak < 0 ? 'streak-negative' : '');
+                const streakDisplay = streak !== 0 ? renderStreakBar(streak) : `<span class="text-gray-400">0</span>`;
+                widget = `
+                    <div class="trade-detail">
+                        <div class="grid grid-cols-3 gap-2">
+                            <div><span class="label">Price</span><div class="value">${(event.data.price || 0).toFixed(2)}</div></div>
+                            <div class="col-span-2">
+                                <span class="label">Streak</span>
+                                <div class="value">${streakDisplay}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (event.type === 'stats_updated') {
+                const d = event.data.data || {};
+                const np = d.net_pl || 0;
+                const pCls = np > 0 ? 'pl-positive' : (np < 0 ? 'pl-negative' : '');
+                widget = `
+                    <div class="trade-detail">
+                        <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                            <div><span class="label">Trades</span><div class="value">${d.total_trades || 0}</div></div>
+                            <div><span class="label">Wins</span><div class="value text-green-600">${d.wins || 0}</div></div>
+                            <div><span class="label">Losses</span><div class="value text-red-600">${d.losses || 0}</div></div>
+                            <div><span class="label">Win Rate</span><div class="value">${(d.win_rate || 0).toFixed(1)}%</div></div>
+                            <div><span class="label">Net P/L</span><div class="value ${pCls}">${np > 0 ? '+' : ''}${fmt(np)}</div></div>
+                        </div>
+                    </div>
+                `;
+            } else if (event.type && event.type.includes('martingale')) {
+                const d = event.data.data || {};
+                widget = `
+                    <div class="trade-detail">
+                        <div class="grid grid-cols-3 gap-2">
+                            <div><span class="label">Step</span><div class="value">${d.step || 0}/${d.max_steps || 0}</div></div>
+                            <div><span class="label">Stake</span><div class="value">${fmt(d.stake)}</div></div>
+                            ${d.loss_streak ? `<div><span class="label">Loss Streak</span><div class="value text-red-600">${d.loss_streak}</div></div>` : ''}
+                        </div>
+                    </div>
+                `;
+            } else if (event.type === 'trade_streak_confirmed') {
+                const streak = event.data.streak || 0;
+                const sCls = streak > 0 ? 'streak-positive' : (streak < 0 ? 'streak-negative' : '');
+                widget = `
+                    <div class="trade-detail">
+                        <div class="grid grid-cols-3 gap-2">
+                            <div><span class="label">Signal</span><div class="value ${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</div></div>
+                            <div><span class="label">Entry</span><div class="value">${(event.data.entry_price || 0).toFixed(2)}</div></div>
+                            <div><span class="label">Streak</span><div class="value ${sCls}">${streak > 0 ? '+' : ''}${streak}</div></div>
+                        </div>
+                    </div>
+                `;
+            } else if (event.type === 'system_heartbeat') {
+                widget = `<div class="text-xs text-gray-400 mt-1">Heartbeat #${event.data.data?.heartbeat_count || 'N/A'}</div>`;
+            }
+            
+            div.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+                        <i class="fas ${icon} text-${color}-500 text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-mono text-sm font-bold text-gray-800">${label}</span>
+                            ${badge}
+                            ${category !== 'unknown' ? `<span class="badge badge-gray">${category}</span>` : ''}
+                        </div>
+                        ${widget}
+                        <div class="text-xs text-gray-400 mt-1">
+                            <i class="far fa-clock mr-1"></i> ${time}
+                        </div>
+                    </div>
+                    ${event.data ? `
+                        <button onclick="toggleDetails('${detailsId}', this)" class="toggle-btn" id="${toggleId}">
+                            <i class="fas fa-chevron-down text-xs"></i>
+                        </button>
+                    ` : ''}
                 </div>
-                ${event.data ? `
-                    <button onclick="toggleDetails('${detailsId}', this)" class="toggle-btn flex-shrink-0" id="${toggleId}">
-                        <i class="fas fa-chevron-down text-gray-400 text-xs"></i>
-                    </button>
-                ` : ''}
-            </div>
-            ${event.data ? `<div class="event-details pl-10 sm:pl-14" id="${detailsId}"><pre class="bg-gray-50 p-2 sm:p-3 rounded text-xs overflow-x-auto max-h-48">${JSON.stringify(event.data, null, 2)}</pre></div>` : ''}
-        `;
-        
-        if (isNew) {
-            // For new events, insert at top with animation
-            stream.insertBefore(eventDiv, stream.firstChild);
+                ${event.data ? `<div class="event-details" id="${detailsId}"><pre>${JSON.stringify(event.data, null, 2)}</pre></div>` : ''}
+            `;
             
-            // Show new event indicator
-            const indicator = document.getElementById('new-event-indicator');
-            indicator.classList.remove('hidden');
-            newEventCount++;
+            if (isNew) {
+                stream.insertBefore(div, stream.firstChild);
+                
+                const ind = document.getElementById('new-event-indicator');
+                ind.classList.remove('hidden');
+                clearTimeout(indicatorTimeout);
+                indicatorTimeout = setTimeout(() => ind.classList.add('hidden'), 2000);
+                
+                while (stream.children.length > 200) {
+                    const last = stream.lastChild;
+                    if (last) last.remove();
+                }
+            } else {
+                stream.appendChild(div);
+            }
             
-            // Auto-hide indicator after 3 seconds
-            clearTimeout(window.indicatorTimeout);
-            window.indicatorTimeout = setTimeout(() => {
-                indicator.classList.add('hidden');
-                newEventCount = 0;
-            }, 3000);
-            
-            // Limit events shown with smooth removal
-            while (stream.children.length > 200) {
-                const lastChild = stream.lastChild;
-                if (lastChild) {
-                    lastChild.classList.add('removing');
-                    setTimeout(() => {
-                        if (lastChild.parentNode) {
-                            lastChild.remove();
-                        }
-                    }, 300);
+            if (event.type === 'stats_updated' && event.data?.data) {
+                const d = event.data.data;
+                if (d.net_pl !== undefined) {
+                    currentPl = d.net_pl;
+                    updatePL(currentPl);
+                }
+                if (d.current_balance !== undefined) {
+                    currentBalance = d.current_balance;
+                    document.getElementById('current-balance').textContent = fmt(currentBalance);
+                }
+                if (d.wins !== undefined) currentWins = d.wins;
+                if (d.losses !== undefined) currentLosses = d.losses;
+                if (d.wins !== undefined || d.losses !== undefined) {
+                    document.getElementById('wl-display').innerHTML = 
+                        `<span class="text-green-600">${currentWins}</span>W / <span class="text-red-600">${currentLosses}</span>L`;
+                }
+                if (d.win_rate !== undefined) {
+                    document.getElementById('win-rate').textContent = `${d.win_rate.toFixed(1)}%`;
                 }
             }
-        } else {
-            stream.appendChild(eventDiv);
-        }
-        
-        // Update stats from stats_updated events
-        if (event.type === 'stats_updated' && event.data?.data) {
-            const data = event.data.data;
-            if (data.net_pl !== undefined) {
-                currentPl = data.net_pl;
-                updatePL(currentPl);
+            
+            if (event.type === 'trade_executed') {
+                pendingTrades++;
+                document.getElementById('pending-trades').textContent = pendingTrades;
             }
-            if (data.current_balance !== undefined) {
-                currentBalance = data.current_balance;
-                document.getElementById('current-balance').textContent = formatNumber(currentBalance);
-            }
-            if (data.wins !== undefined) {
-                currentWins = data.wins;
-            }
-            if (data.losses !== undefined) {
-                currentLosses = data.losses;
-            }
-            if (data.wins !== undefined || data.losses !== undefined) {
-                document.getElementById('wl-display').innerHTML = 
-                    `<span class="text-green-600">${currentWins}</span>W / <span class="text-red-600">${currentLosses}</span>L`;
-            }
-            if (data.win_rate !== undefined) {
-                document.getElementById('win-rate').textContent = `${data.win_rate.toFixed(1)}%`;
+            if (event.type === 'trade_recorded' || event.type === 'trade_resolved') {
+                pendingTrades = Math.max(0, pendingTrades - 1);
+                document.getElementById('pending-trades').textContent = pendingTrades;
             }
         }
         
-        // Update pending trades
-        if (event.type === 'trade_executed') {
-            pendingTrades++;
-            document.getElementById('pending-trades').textContent = pendingTrades;
+        window.toggleDetails = function(id, btn) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.classList.toggle('visible');
+                btn.classList.toggle('active');
+            }
+        };
+        
+        function updatePL(pl) {
+            const el = document.getElementById('current-pl');
+            const sign = pl > 0 ? '+' : '';
+            el.textContent = `${sign}${fmt(pl)}`;
+            if (pl > 0) {
+                el.className = 'stat-value pl-positive';
+            } else if (pl < 0) {
+                el.className = 'stat-value pl-negative';
+            } else {
+                el.className = 'stat-value text-gray-800';
+            }
         }
-        if (event.type === 'trade_recorded' || event.type === 'trade_resolved') {
-            pendingTrades = Math.max(0, pendingTrades - 1);
-            document.getElementById('pending-trades').textContent = pendingTrades;
+        
+        function updateCounts() {
+            document.getElementById('event-count').textContent = `${eventCount} events`;
+            document.getElementById('total-events').textContent = eventCount;
         }
-    }
-    
-    function toggleDetails(detailsId, button) {
-        const details = document.getElementById(detailsId);
-        if (details) {
-            details.classList.toggle('visible');
-            button.classList.toggle('active');
-        }
-    }
-    
-    function updatePL(pl) {
-        const plElement = document.getElementById('current-pl');
-        const sign = pl > 0 ? '+' : '';
-        plElement.textContent = `${sign}${formatNumber(pl)}`;
-        plElement.className = `text-lg sm:text-2xl font-bold pl-value ${pl > 0 ? 'positive' : (pl < 0 ? 'negative' : '')}`;
-    }
-    
-    function clearEvents() {
-        const items = stream.children;
-        for (let i = items.length - 1; i >= 0; i--) {
-            items[i].classList.add('removing');
-        }
-        setTimeout(() => {
+        
+        window.clearEvents = function() {
             stream.innerHTML = '';
             eventCount = 0;
-            document.getElementById('event-count').textContent = '0 events';
-            document.getElementById('total-events').textContent = '0';
-        }, 300);
-    }
-    
-    function toggleAutoScroll() {
-        autoScroll = !autoScroll;
-        const btn = document.getElementById('auto-scroll-btn');
-        if (autoScroll) {
-            btn.innerHTML = '<i class="fas fa-arrow-down"></i> Auto';
-            btn.className = 'text-xs sm:text-sm text-gray-400 hover:text-gray-600 transition-colors';
-        } else {
-            btn.innerHTML = '<i class="fas fa-pause"></i> Paused';
-            btn.className = 'text-xs sm:text-sm text-blue-600 hover:text-blue-700 transition-colors';
-        }
-    }
-    
-    // Render initial events
-    renderEvents(initialEvents);
-    
-    // Format initial stats
-    updatePL(currentPl);
-    document.getElementById('current-balance').textContent = formatNumber(currentBalance);
-    
-    async function stopWorker() {
-        if (!confirm(`Are you sure you want to stop worker ${workerId}?`)) {
-            return;
-        }
+            updateCounts();
+        };
         
-        const btn = document.getElementById('stop-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Stopping...';
-        btn.className = 'stop-btn px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-400 text-white text-xs sm:text-sm font-medium rounded-md cursor-not-allowed';
-        
-        try {
-            const response = await fetch(`/workers/${workerId}/stop`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            });
-            
-            const data = await response.json();
-            
-            if (response.ok) {
-                isRunning = false;
-                const statusBadge = document.getElementById('worker-status');
-                statusBadge.className = 'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800';
-                statusBadge.innerHTML = '<i class="fas fa-circle text-red-500 text-xs mr-1"></i> Stopped';
-                
-                btn.innerHTML = '<i class="fas fa-check mr-1"></i> Stopped';
-                btn.className = 'stop-btn px-3 py-1.5 sm:px-4 sm:py-2 bg-green-600 text-white text-xs sm:text-sm font-medium rounded-md cursor-default';
-                btn.disabled = true;
-                
-                showNotification('success', `Worker ${data.worker_id} stopped successfully`);
+        window.toggleAutoScroll = function() {
+            autoScroll = !autoScroll;
+            const btn = document.getElementById('auto-scroll-btn');
+            if (autoScroll) {
+                btn.innerHTML = '<i class="fas fa-arrow-down mr-1"></i> Auto';
+                btn.className = 'text-sm text-gray-500 hover:text-gray-700';
             } else {
-                throw new Error(data.message || 'Failed to stop worker');
+                btn.innerHTML = '<i class="fas fa-pause mr-1"></i> Paused';
+                btn.className = 'text-sm text-blue-600 hover:text-blue-700';
             }
-        } catch (error) {
-            console.error('Error stopping worker:', error);
-            btn.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Error';
-            btn.className = 'stop-btn px-3 py-1.5 sm:px-4 sm:py-2 bg-red-600 text-white text-xs sm:text-sm font-medium rounded-md';
-            btn.disabled = false;
-            
-            showNotification('error', `Failed to stop worker: ${error.message}`);
-        }
-    }
-    
-    function showNotification(type, message) {
-        const notification = document.createElement('div');
-        const colors = {
-            success: 'bg-green-100 border-green-400 text-green-700',
-            error: 'bg-red-100 border-red-400 text-red-700',
-            info: 'bg-blue-100 border-blue-400 text-blue-700'
         };
         
-        notification.className = `fixed top-4 right-4 z-50 px-4 sm:px-6 py-3 sm:py-4 rounded-lg border shadow-lg ${colors[type] || colors.info} max-w-md`;
-        notification.innerHTML = `
-            <div class="flex items-start">
-                <div class="flex-shrink-0">
-                    <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'} mr-2"></i>
-                </div>
-                <div class="flex-1">
-                    <p class="text-sm font-medium">${message}</p>
-                </div>
-                <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-gray-400 hover:text-gray-600">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-        `;
+        renderEvents(initialEvents);
+        updatePL(currentPl);
+        document.getElementById('current-balance').textContent = fmt(currentBalance);
         
-        document.body.appendChild(notification);
-        
-        setTimeout(() => {
-            if (notification.parentElement) {
-                notification.remove();
-            }
-        }, 5000);
-    }
-    
-    function connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/monitor/ws/${workerId}`;
-        const ws = new WebSocket(wsUrl);
-        
-        ws.onopen = function() {
-            document.getElementById('ws-status').innerHTML = 
-                '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">' +
-                '<i class="fas fa-circle text-green-500 text-xs mr-1 status-dot"></i> Connected' +
-                '</span>';
-        };
-        
-        ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
+        window.stopWorker = async function() {
+            const btn = document.getElementById('stop-btn');
+            btn.disabled = true;
+            btn.textContent = 'Stopping...';
             
-            if (data.type === 'initial') {
-                console.log(`Initial load: ${data.events ? data.events.length : 0} events`);
-            } else if (data.type === 'new_event') {
-                eventCount++;
-                addEventToStream(data.event, true);
-                document.getElementById('event-count').textContent = `${eventCount} events`;
-                document.getElementById('total-events').textContent = eventCount;
-                
-                if (autoScroll) {
-                    stream.scrollTop = 0;
-                }
-            } else if (data.type === 'new_log') {
-                console.log('New log:', data.log);
-            } else if (data.type === 'error') {
-                console.error('WebSocket error:', data.message);
-            } else if (data.type === 'status_update') {
-                isRunning = data.is_running;
-                const statusBadge = document.getElementById('worker-status');
-                if (data.is_running) {
-                    statusBadge.className = 'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800';
-                    statusBadge.innerHTML = '<i class="fas fa-circle text-green-500 text-xs mr-1 status-dot"></i> Running';
+            try {
+                const res = await fetch(`/workers/${workerId}/stop`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) {
+                    const badge = document.getElementById('worker-status');
+                    badge.innerHTML = '<span class="status-dot offline"></span> Stopped';
+                    badge.className = 'text-xs font-medium text-red-600';
+                    btn.textContent = '✓ Stopped';
+                    btn.className = 'stop-btn bg-gray-400 cursor-default';
+                    btn.disabled = true;
+                    
+                    if (ws) {
+                        ws.close();
+                        ws = null;
+                    }
+                    
+                    showNotif('success', `Worker ${data.worker_id} stopped`);
                 } else {
-                    statusBadge.className = 'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800';
-                    statusBadge.innerHTML = '<i class="fas fa-circle text-red-500 text-xs mr-1 status-dot"></i> Stopped';
+                    throw new Error(data.message || 'Failed');
                 }
+            } catch (e) {
+                btn.textContent = 'Error';
+                btn.className = 'stop-btn bg-red-600';
+                btn.disabled = false;
+                showNotif('error', `Failed: ${e.message}`);
             }
         };
         
-        ws.onerror = function(error) {
-            console.error('WebSocket error:', error);
-            document.getElementById('ws-status').innerHTML = 
-                '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">' +
-                '<i class="fas fa-circle text-red-500 text-xs mr-1"></i> Error' +
-                '</span>';
-        };
+        function showNotif(type, msg) {
+            const colors = {
+                success: 'bg-green-50 border-green-400 text-green-700',
+                error: 'bg-red-50 border-red-400 text-red-700'
+            };
+            const div = document.createElement('div');
+            div.className = `fixed top-4 right-4 z-50 px-4 py-3 rounded-lg border shadow-lg ${colors[type] || colors.success} max-w-md`;
+            div.innerHTML = `
+                <div class="flex items-start gap-2">
+                    <i class="fas ${type === 'success' ? 'fa-check-circle text-green-500' : 'fa-exclamation-circle text-red-500'} mt-0.5"></i>
+                    <span class="text-sm font-medium">${msg}</span>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-auto text-gray-400 hover:text-gray-600">×</button>
+                </div>
+            `;
+            document.body.appendChild(div);
+            setTimeout(() => { if (div.parentElement) div.remove(); }, 4000);
+        }
         
-        ws.onclose = function() {
-            document.getElementById('ws-status').innerHTML = 
-                '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">' +
-                '<i class="fas fa-circle text-gray-500 text-xs mr-1"></i> Disconnected' +
-                '</span>';
-            setTimeout(connectWebSocket, 3000);
-        };
+        function connectWS() {
+            if (!isRunning) {
+                document.getElementById('ws-status').innerHTML = 
+                    '<span class="status-dot offline"></span> Disconnected (worker stopped)';
+                return null;
+            }
+            
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${proto}//${location.host}/monitor/ws/${workerId}`;
+            
+            try {
+                const newWs = new WebSocket(url);
+                
+                newWs.onopen = () => {
+                    reconnectAttempts = 0;
+                    document.getElementById('ws-status').innerHTML = 
+                        '<span class="status-dot online"></span> Connected';
+                };
+                
+                newWs.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.type === 'new_event') {
+                            eventCount++;
+                            addEventToStream(data.event, true);
+                            updateCounts();
+                            if (autoScroll) stream.scrollTop = 0;
+                        } else if (data.type === 'status_update') {
+                            const badge = document.getElementById('worker-status');
+                            if (data.is_running) {
+                                badge.innerHTML = '<span class="status-dot online"></span> Running';
+                                badge.className = 'text-xs font-medium text-green-600';
+                            } else {
+                                badge.innerHTML = '<span class="status-dot offline"></span> Stopped';
+                                badge.className = 'text-xs font-medium text-red-600';
+                                if (ws) {
+                                    ws.close();
+                                    ws = null;
+                                }
+                            }
+                        } else if (data.type === 'error') {
+                            console.error('WS error:', data.message);
+                        }
+                    } catch (parseError) {
+                        console.error('Failed to parse WebSocket message:', parseError);
+                    }
+                };
+                
+                newWs.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    document.getElementById('ws-status').innerHTML = 
+                        '<span class="status-dot offline"></span> Error';
+                };
+                
+                newWs.onclose = () => {
+                    document.getElementById('ws-status').innerHTML = 
+                        '<span class="status-dot offline"></span> Disconnected';
+                    
+                    if (isRunning && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                        reconnectAttempts++;
+                        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                        reconnectTimer = setTimeout(() => {
+                            if (isRunning) {
+                                ws = connectWS();
+                            }
+                        }, delay);
+                    }
+                };
+                
+                return newWs;
+            } catch (error) {
+                console.error('Failed to create WebSocket:', error);
+                return null;
+            }
+        }
         
-        return ws;
-    }
-    
-    let ws = connectWebSocket();
-    
-    window.addEventListener('beforeunload', function() {
-        if (ws) ws.close();
-    });
+        if (isRunning) {
+            ws = connectWS();
+        } else {
+            document.getElementById('ws-status').innerHTML = 
+                '<span class="status-dot offline"></span> Disconnected (worker stopped)';
+        }
+        
+        window.addEventListener('beforeunload', () => {
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        });
+        
+        const healthCheckInterval = setInterval(() => {
+            const statusBadge = document.getElementById('worker-status');
+            const isRunningNow = statusBadge.textContent.includes('Running');
+            
+            if (isRunningNow && (!ws || ws.readyState === WebSocket.CLOSED)) {
+                ws = connectWS();
+            }
+        }, 10000);
+        
+        window.addEventListener('beforeunload', () => {
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval);
+            }
+        });
+        
+    })();
 </script>
 {% endblock %}
