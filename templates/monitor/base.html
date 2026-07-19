@@ -2,53 +2,317 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <title>{% block title %}Worker Monitor{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        button, 
+        a,
+        .clickable {
+            min-height: 44px;
+            min-width: 44px;
+        }
+        
+        body {
+            overflow-x: hidden;
+            width: 100%;
+            max-width: 100vw;
+        }
+        
+        .container-fluid {
+            width: 100%;
+            max-width: 100%;
+            padding-left: 12px;
+            padding-right: 12px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        @media (min-width: 640px) {
+            .container-fluid {
+                padding-left: 24px;
+                padding-right: 24px;
+            }
+        }
+        
+        @media (min-width: 1024px) {
+            .container-fluid {
+                padding-left: 32px;
+                padding-right: 32px;
+                max-width: 1280px;
+            }
+        }
+        
+        .nav-container {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 60px;
+            padding: 8px 0;
+            gap: 8px;
+        }
+        
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        
+        .nav-brand h1 {
+            font-size: 1rem;
+            font-weight: 700;
+        }
+        
+        @media (min-width: 640px) {
+            .nav-brand h1 {
+                font-size: 1.25rem;
+            }
+        }
+        
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .nav-links a {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 10px;
+            font-size: 0.8rem;
+            border-radius: 6px;
+            text-decoration: none;
+            transition: background-color 0.2s;
+            min-height: 36px;
+        }
+        
+        .nav-links a i {
+            font-size: 0.9rem;
+        }
+        
+        @media (min-width: 640px) {
+            .nav-links a {
+                padding: 8px 16px;
+                font-size: 0.875rem;
+                min-height: 44px;
+            }
+        }
+        
+        .nav-links a:hover {
+            background-color: #f3f4f6;
+        }
+        
+        .nav-toggle {
+            display: flex;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 8px;
+            min-height: 44px;
+            min-width: 44px;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        @media (min-width: 768px) {
+            .nav-toggle {
+                display: none;
+            }
+        }
+        
+        .nav-links.mobile-hidden {
+            display: none;
+        }
+        
+        @media (min-width: 768px) {
+            .nav-links.mobile-hidden {
+                display: flex !important;
+            }
+        }
+        
+        .nav-links.mobile-visible {
+            display: flex !important;
+            flex-direction: row;
+            width: 100%;
+            padding: 12px 0;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .nav-links.mobile-visible a {
+            flex: 0 1 auto;
+            justify-content: center;
+            min-width: 80px;
+        }
+        
+        @media (min-width: 768px) {
+            .nav-links.mobile-visible {
+                flex-direction: row;
+                width: auto;
+                padding: 0;
+                gap: 8px;
+                justify-content: flex-end;
+                flex-wrap: nowrap;
+            }
+            .nav-links.mobile-visible a {
+                flex: 0 0 auto;
+                min-width: auto;
+            }
+        }
+        
+        footer {
+            margin-top: 2rem;
+        }
+        
+        footer p {
+            font-size: 0.7rem;
+        }
+        
+        @media (min-width: 640px) {
+            footer p {
+                font-size: 0.875rem;
+            }
+        }
+        
+        main {
+            padding-top: 16px;
+            padding-bottom: 16px;
+        }
+        
+        @media (min-width: 640px) {
+            main {
+                padding-top: 32px;
+                padding-bottom: 32px;
+            }
+        }
+        
+        .table-responsive {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .card {
+            padding: 12px;
+        }
+        
+        @media (min-width: 640px) {
+            .card {
+                padding: 20px;
+            }
+        }
+        
+        .grid-mobile-1 {
+            grid-template-columns: 1fr;
+        }
+        
+        @media (min-width: 640px) {
+            .grid-mobile-2 {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (min-width: 1024px) {
+            .grid-mobile-3 {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            .grid-mobile-4 {
+                grid-template-columns: repeat(4, 1fr);
+            }
+            .grid-mobile-5 {
+                grid-template-columns: repeat(5, 1fr);
+            }
+        }
+    </style>
     {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-gray-50">
-    <!-- Navigation -->
     <nav class="bg-white shadow-lg border-b border-gray-200 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <i class="fas fa-robot text-blue-600 text-2xl mr-3"></i>
-                    <h1 class="text-xl font-bold text-gray-800">Worker Monitor</h1>
+        <div class="container-fluid">
+            <div class="nav-container">
+                <div class="nav-brand">
+                    <i class="fas fa-robot text-blue-600 text-xl sm:text-2xl"></i>
+                    <h1 class="text-gray-800">Worker Monitor</h1>
                 </div>
-                <div class="flex items-center space-x-4">
-                    <a href="/monitor/" class="text-gray-600 hover:text-gray-900 transition-colors">
-                        <i class="fas fa-list mr-1"></i> Dashboard
+                
+                <button class="nav-toggle md:hidden" onclick="toggleMobileMenu()" aria-label="Toggle navigation menu">
+                    <i class="fas fa-bars text-gray-600"></i>
+                </button>
+                
+                <div class="nav-links mobile-hidden" id="navLinks">
+                    <a href="/monitor/" class="text-gray-600 hover:text-gray-900 hover:bg-gray-100">
+                        <i class="fas fa-list mr-1 sm:mr-2"></i> 
+                        <span>Dashboard</span>
                     </a>
-                    <a href="/workers" class="text-gray-600 hover:text-gray-900 transition-colors">
-                        <i class="fas fa-cogs mr-1"></i> Workers
+                    <a href="/workers" class="text-gray-600 hover:text-gray-900 hover:bg-gray-100">
+                        <i class="fas fa-cogs mr-1 sm:mr-2"></i> 
+                        <span>Workers</span>
                     </a>
-                    <a href="/health" class="text-gray-600 hover:text-gray-900 transition-colors">
-                        <i class="fas fa-heart mr-1"></i> Health
+                    <a href="/health" class="text-gray-600 hover:text-gray-900 hover:bg-gray-100">
+                        <i class="fas fa-heart mr-1 sm:mr-2"></i> 
+                        <span>Health</span>
                     </a>
                 </div>
             </div>
         </div>
     </nav>
 
-    <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="container-fluid">
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-white border-t border-gray-200 mt-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <p class="text-center text-sm text-gray-500">
+    <footer class="bg-white border-t border-gray-200 mt-8 sm:mt-12">
+        <div class="container-fluid py-3 sm:py-4">
+            <p class="text-center text-gray-500">
                 Worker Event Monitor &bull; Real-time worker monitoring
             </p>
         </div>
     </footer>
 
-    <!-- Global JavaScript -->
     <script>
-        // Utility functions for client-side use
+        function toggleMobileMenu() {
+            const navLinks = document.getElementById('navLinks');
+            const isHidden = navLinks.classList.contains('mobile-hidden');
+            
+            if (isHidden) {
+                navLinks.classList.remove('mobile-hidden');
+                navLinks.classList.add('mobile-visible');
+            } else {
+                navLinks.classList.remove('mobile-visible');
+                navLinks.classList.add('mobile-hidden');
+            }
+        }
+        
+        window.addEventListener('resize', function() {
+            const navLinks = document.getElementById('navLinks');
+            if (window.innerWidth >= 768) {
+                navLinks.classList.remove('mobile-visible');
+                navLinks.classList.add('mobile-hidden');
+            }
+        });
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const links = document.querySelectorAll('#navLinks a');
+            links.forEach(link => {
+                link.addEventListener('click', function() {
+                    const navLinks = document.getElementById('navLinks');
+                    if (window.innerWidth < 768) {
+                        navLinks.classList.remove('mobile-visible');
+                        navLinks.classList.add('mobile-hidden');
+                    }
+                });
+            });
+        });
+
         function formatTimestampClient(timestamp) {
             if (!timestamp) return 'N/A';
             try {
