@@ -5,6 +5,7 @@ from typing import Optional
 import json
 import os
 from datetime import datetime
+import math
 
 from redis_manager import redis_manager
 from persistent_worker import workers
@@ -21,7 +22,6 @@ def format_timestamp(value):
         return "N/A"
     try:
         if isinstance(value, str):
-            # Try to parse ISO format
             dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
             return dt.strftime("%Y-%m-%d %H:%M:%S")
         return str(value)
@@ -92,11 +92,101 @@ def truncate_text(value, length=80):
     return str(value)
 
 
-# Register filters
+def get_event_badge(event_type):
+    """Get badge style for event type"""
+    badges = {
+        "trade_recorded": "bg-emerald-100 text-emerald-800",
+        "trade_executed": "bg-blue-100 text-blue-800",
+        "trade_resolved": "bg-purple-100 text-purple-800",
+        "trade_streak_confirmed": "bg-yellow-100 text-yellow-800",
+        "market_tick_analysis": "bg-indigo-100 text-indigo-800",
+        "stats_updated": "bg-cyan-100 text-cyan-800",
+        "stats_final_summary": "bg-purple-100 text-purple-800",
+        "martingale_prefetched": "bg-pink-100 text-pink-800",
+        "martingale_reset": "bg-red-100 text-red-800",
+        "system_heartbeat": "bg-gray-100 text-gray-800",
+        "system_bot_cancelled": "bg-red-100 text-red-800",
+        "system_worker_start": "bg-green-100 text-green-800",
+        "config_base_stake_set": "bg-orange-100 text-orange-800",
+        "system_trade_kickoff": "bg-amber-100 text-amber-800",
+        "system_trade_worker_started": "bg-teal-100 text-teal-800",
+        "connection_created": "bg-cyan-100 text-cyan-800",
+        "connection_execution_ready": "bg-green-100 text-green-800",
+        "connection_polling_ready": "bg-green-100 text-green-800",
+        "connection_streaming_connected": "bg-cyan-100 text-cyan-800",
+        "connection_tick_stream_subscribed": "bg-cyan-100 text-cyan-800",
+        "connection_connections_ready": "bg-green-100 text-green-800",
+        "market_analyzing_market": "bg-indigo-100 text-indigo-800",
+        "system_fetching_balance": "bg-blue-100 text-blue-800",
+        "config_banner_displayed": "bg-orange-100 text-orange-800",
+        "stats_starting_balance": "bg-cyan-100 text-cyan-800",
+        "worker_lifecycle": "bg-gray-100 text-gray-800",
+    }
+    return badges.get(event_type, "bg-gray-100 text-gray-800")
+
+
+def get_profit_color(profit):
+    """Get color for profit value"""
+    if profit is None:
+        return "text-gray-500"
+    try:
+        p = float(profit)
+        if p > 0:
+            return "text-green-600"
+        elif p < 0:
+            return "text-red-600"
+        return "text-gray-500"
+    except:
+        return "text-gray-500"
+
+
+def format_currency(value, currency="USD"):
+    """Format currency value"""
+    if value is None:
+        return "N/A"
+    try:
+        val = float(value)
+        if val >= 0:
+            return f"+{val:.2f} {currency}"
+        return f"{val:.2f} {currency}"
+    except:
+        return str(value)
+
+
+def get_trade_result_badge(result):
+    """Get badge for trade result"""
+    if result == "WON":
+        return "bg-green-100 text-green-800"
+    elif result == "LOST":
+        return "bg-red-100 text-red-800"
+    return "bg-gray-100 text-gray-800"
+
+
+def get_streak_color(streak):
+    """Get color for streak value"""
+    if streak is None:
+        return "text-gray-500"
+    try:
+        s = int(streak)
+        if s > 0:
+            return "text-green-600"
+        elif s < 0:
+            return "text-red-600"
+        return "text-gray-500"
+    except:
+        return "text-gray-500"
+
+
+# Register all filters
 templates.env.filters["formatTimestamp"] = format_timestamp
 templates.env.filters["getEventIcon"] = get_event_icon
 templates.env.filters["getEventColor"] = get_event_color
 templates.env.filters["truncate"] = truncate_text
+templates.env.filters["getEventBadge"] = get_event_badge
+templates.env.filters["getProfitColor"] = get_profit_color
+templates.env.filters["formatCurrency"] = format_currency
+templates.env.filters["getTradeResultBadge"] = get_trade_result_badge
+templates.env.filters["getStreakColor"] = get_streak_color
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
 
@@ -108,6 +198,8 @@ async def monitor_dashboard(request: Request):
 
     # Enhance worker data
     enhanced_workers = []
+    total_pl = 0
+
     for worker_state in all_workers:
         worker_id = worker_state.get("worker_id")
         is_running = worker_id in workers and workers[worker_id].is_running
@@ -124,9 +216,23 @@ async def monitor_dashboard(request: Request):
             except:
                 pass
 
-        # Get latest event
-        latest_events = await redis_manager.get_events(worker_id, limit=1)
+        # Get latest events
+        latest_events = await redis_manager.get_events(worker_id, limit=5)
         latest_event = latest_events[0] if latest_events else None
+
+        # Get current P/L
+        pl = 0
+        balance = 0
+        for event in latest_events:
+            if event.get("type") == "stats_updated":
+                data = event.get("data", {})
+                if "net_pl" in data:
+                    pl = data["net_pl"]
+                if "current_balance" in data:
+                    balance = data["current_balance"]
+                break
+
+        total_pl += pl
 
         enhanced_workers.append(
             {
@@ -139,6 +245,8 @@ async def monitor_dashboard(request: Request):
                 "config": config,
                 "latest_event": latest_event,
                 "last_heartbeat": worker_state.get("last_heartbeat"),
+                "pnl": pl,
+                "balance": balance,
             }
         )
 
@@ -152,6 +260,7 @@ async def monitor_dashboard(request: Request):
             "workers": enhanced_workers,
             "total_workers": len(enhanced_workers),
             "running_workers": sum(1 for w in enhanced_workers if w["is_running"]),
+            "total_pl": total_pl,
         },
     )
 
@@ -166,11 +275,30 @@ async def worker_detail(request: Request, worker_id: str):
 
     # Get worker stats
     stats = await redis_manager.get_worker_stats(worker_id)
-    events = await redis_manager.get_worker_event_stream(worker_id, limit=100)
+    events = await redis_manager.get_worker_event_stream(worker_id, limit=200)
     logs = await redis_manager.get_log_history(worker_id, limit=50)
 
     # Parse config
     config = stats.get("config", {})
+
+    # Get current P/L and stats
+    current_pl = 0
+    current_balance = 0
+    win_rate = 0
+    total_trades = 0
+
+    # Get latest stats_updated event
+    stats_events = await redis_manager.get_events(worker_id, "stats_updated", limit=1)
+    if stats_events:
+        data = stats_events[0].get("data", {})
+        if "net_pl" in data:
+            current_pl = data["net_pl"]
+        if "current_balance" in data:
+            current_balance = data["current_balance"]
+        if "total_trades" in data:
+            total_trades = data["total_trades"]
+        if "win_rate" in data:
+            win_rate = data["win_rate"]
 
     # Get WebSocket URL
     ws_url = (
@@ -192,6 +320,10 @@ async def worker_detail(request: Request, worker_id: str):
             "event_types": stats.get("event_types", {}),
             "categories": stats.get("categories", {}),
             "ws_url": ws_url,
+            "current_pl": current_pl,
+            "current_balance": current_balance,
+            "win_rate": win_rate,
+            "total_trades": total_trades,
         },
     )
 
@@ -206,6 +338,16 @@ async def api_list_workers():
         worker_id = worker_state.get("worker_id")
         is_running = worker_id in workers and workers[worker_id].is_running
 
+        # Get latest P/L
+        stats_events = await redis_manager.get_events(
+            worker_id, "stats_updated", limit=1
+        )
+        pl = 0
+        if stats_events:
+            data = stats_events[0].get("data", {})
+            if "net_pl" in data:
+                pl = data["net_pl"]
+
         workers_list.append(
             {
                 "worker_id": worker_id,
@@ -213,6 +355,7 @@ async def api_list_workers():
                 "status": worker_state.get("status", "unknown"),
                 "started_at": worker_state.get("started_at"),
                 "stopped_at": worker_state.get("stopped_at"),
+                "pnl": pl,
             }
         )
 
@@ -241,3 +384,33 @@ async def api_get_worker_stats(worker_id: str):
 
     stats = await redis_manager.get_worker_stats(worker_id)
     return stats
+
+
+@router.get("/api/worker/{worker_id}/pnl")
+async def api_get_worker_pnl(worker_id: str):
+    """API endpoint to get worker P/L history"""
+    state = await redis_manager.get_worker_state(worker_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Worker {worker_id} not found")
+
+    events = await redis_manager.get_events(worker_id, limit=100)
+    pl_history = []
+
+    for event in events:
+        if event.get("type") == "stats_updated":
+            data = event.get("data", {})
+            if "net_pl" in data:
+                pl_history.append(
+                    {
+                        "timestamp": event.get("timestamp"),
+                        "net_pl": data["net_pl"],
+                        "total_trades": data.get("total_trades", 0),
+                        "win_rate": data.get("win_rate", 0),
+                    }
+                )
+
+    return {
+        "worker_id": worker_id,
+        "pl_history": pl_history[::-1],  # Oldest first for charting
+        "current_pl": pl_history[-1]["net_pl"] if pl_history else 0,
+    }

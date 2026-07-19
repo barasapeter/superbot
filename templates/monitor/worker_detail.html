@@ -5,52 +5,58 @@
 {% block extra_head %}
 <style>
     .event-item {
-        transition: all 0.2s ease;
-        border-left: 3px solid transparent;
+        transition: all 0.3s ease;
+        border-left: 4px solid transparent;
+        position: relative;
     }
     .event-item:hover {
         background-color: #f9fafb;
+        transform: translateX(4px);
     }
     .event-item.new {
-        animation: slideIn 0.3s ease;
+        animation: slideIn 0.4s ease;
         border-left-color: #3b82f6;
+        background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, transparent 100%);
     }
-    .event-item.trade {
+    .event-item.trade-won {
         border-left-color: #10b981;
+        background: linear-gradient(90deg, rgba(16, 185, 129, 0.05) 0%, transparent 100%);
     }
-    .event-item.system {
-        border-left-color: #6b7280;
+    .event-item.trade-lost {
+        border-left-color: #ef4444;
+        background: linear-gradient(90deg, rgba(239, 68, 68, 0.05) 0%, transparent 100%);
     }
     .event-item.market {
         border-left-color: #3b82f6;
     }
-    .event-item.connection {
-        border-left-color: #06b6d4;
-    }
-    .event-item.config {
-        border-left-color: #f59e0b;
-    }
-    .event-item.stats {
-        border-left-color: #6366f1;
+    .event-item.system {
+        border-left-color: #6b7280;
     }
     .event-item.martingale {
         border-left-color: #ec4899;
+    }
+    .event-item.stats {
+        border-left-color: #8b5cf6;
+    }
+    .event-item.connection {
+        border-left-color: #06b6d4;
     }
     
     @keyframes slideIn {
         from {
             opacity: 0;
-            transform: translateX(-10px);
+            transform: translateX(-20px) scale(0.95);
         }
         to {
             opacity: 1;
-            transform: translateX(0);
+            transform: translateX(0) scale(1);
         }
     }
     
     #event-stream {
         max-height: 600px;
         overflow-y: auto;
+        scroll-behavior: smooth;
     }
     #event-stream::-webkit-scrollbar {
         width: 6px;
@@ -70,21 +76,33 @@
     .log-line {
         font-family: 'Courier New', monospace;
         font-size: 0.813rem;
-        padding: 2px 8px;
+        padding: 4px 12px;
         border-bottom: 1px solid #f3f4f6;
         white-space: pre-wrap;
         word-break: break-all;
+        transition: background 0.2s;
     }
     .log-line:hover {
         background-color: #f9fafb;
     }
     
     .stats-card {
-        transition: all 0.2s ease;
+        transition: all 0.3s ease;
+        cursor: default;
+        position: relative;
+        overflow: hidden;
     }
     .stats-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transform: translateY(-4px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+    .stats-card .icon-bg {
+        position: absolute;
+        right: -10px;
+        top: -10px;
+        font-size: 4rem;
+        opacity: 0.1;
+        transform: rotate(15deg);
     }
     
     .badge {
@@ -94,6 +112,44 @@
         font-weight: 500;
         display: inline-flex;
         align-items: center;
+        gap: 4px;
+    }
+    
+    .trade-detail {
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-top: 8px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .pl-value {
+        transition: all 0.3s ease;
+    }
+    .pl-value.positive {
+        color: #10b981;
+    }
+    .pl-value.negative {
+        color: #ef4444;
+    }
+    
+    .pulse {
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    .stop-btn {
+        transition: all 0.3s ease;
+    }
+    .stop-btn:hover {
+        transform: scale(1.05);
+    }
+    .stop-btn:active {
+        transform: scale(0.95);
     }
 </style>
 {% endblock %}
@@ -105,29 +161,32 @@
         <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
                 <div class="flex items-center space-x-3">
-                    <h2 class="text-2xl font-bold text-gray-800">
-                        <i class="fas fa-microchip mr-2"></i> {{ worker_id }}
-                    </h2>
-                    <span id="ws-status" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                        <i class="fas fa-circle text-yellow-500 text-xs mr-1"></i> Connecting...
-                    </span>
-                </div>
-                <div class="flex items-center space-x-4 mt-2">
-                    {% if is_running %}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        <i class="fas fa-play text-green-500 text-xs mr-1"></i> Running
-                    </span>
-                    {% else %}
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                        <i class="fas fa-stop text-red-500 text-xs mr-1"></i> Stopped
-                    </span>
-                    {% endif %}
-                    <span class="text-sm text-gray-500">
-                        Started: {{ state.started_at|formatTimestamp }}
-                    </span>
+                    <div class="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                        <i class="fas fa-microchip text-blue-600 text-xl"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">{{ worker_id }}</h2>
+                        <div class="flex items-center space-x-3 mt-1">
+                            <span id="ws-status" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                <i class="fas fa-circle text-yellow-500 text-xs mr-1"></i> Connecting...
+                            </span>
+                            <span id="worker-status" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if is_running %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+                                <i class="fas fa-circle text-{% if is_running %}green{% else %}red{% endif %}-500 text-xs mr-1"></i>
+                                {% if is_running %}Running{% else %}Stopped{% endif %}
+                            </span>
+                            <span class="text-sm text-gray-500">
+                                Started: {{ state.started_at|formatTimestamp }}
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="flex space-x-2 flex-wrap gap-2">
+                {% if is_running %}
+                <button onclick="stopWorker()" id="stop-btn" class="stop-btn px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-all shadow-md hover:shadow-lg">
+                    <i class="fas fa-stop mr-1"></i> Stop Worker
+                </button>
+                {% endif %}
                 <button onclick="location.reload()" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-md transition-colors">
                     <i class="fas fa-sync-alt mr-1"></i> Refresh
                 </button>
@@ -138,29 +197,42 @@
         </div>
     </div>
 
-    <!-- Stats -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <!-- P/L and Stats Overview -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <i class="fas fa-dollar-sign icon-bg text-green-500"></i>
+            <div class="text-sm text-gray-500">Current P/L</div>
+            <div class="text-2xl font-bold pl-value {% if current_pl > 0 %}positive{% elif current_pl < 0 %}negative{% endif %}" id="current-pl">
+                {% if current_pl > 0 %}+{% endif %}{{ "%.2f"|format(current_pl) }} USD
+            </div>
+            <div class="text-xs text-gray-400 mt-1">Updated in real-time</div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <i class="fas fa-wallet icon-bg text-blue-500"></i>
+            <div class="text-sm text-gray-500">Balance</div>
+            <div class="text-2xl font-bold text-gray-800" id="current-balance">
+                {{ "%.2f"|format(current_balance) }} USD
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <i class="fas fa-trophy icon-bg text-yellow-500"></i>
+            <div class="text-sm text-gray-500">Win Rate</div>
+            <div class="text-2xl font-bold text-gray-800" id="win-rate">{{ "%.1f"|format(win_rate) }}%</div>
+            <div class="text-xs text-gray-400" id="total-trades">{{ total_trades }} total trades</div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <i class="fas fa-calendar-alt icon-bg text-purple-500"></i>
             <div class="text-sm text-gray-500">Total Events</div>
             <div class="text-2xl font-bold text-gray-800" id="total-events">{{ total_events }}</div>
         </div>
+        
         <div class="bg-white rounded-lg shadow p-4 stats-card">
+            <i class="fas fa-tags icon-bg text-pink-500"></i>
             <div class="text-sm text-gray-500">Event Types</div>
             <div class="text-2xl font-bold text-gray-800">{{ event_types|length }}</div>
-        </div>
-        <div class="bg-white rounded-lg shadow p-4 stats-card">
-            <div class="text-sm text-gray-500">Categories</div>
-            <div class="text-2xl font-bold text-gray-800">{{ categories|length }}</div>
-        </div>
-        <div class="bg-white rounded-lg shadow p-4 stats-card">
-            <div class="text-sm text-gray-500">Latest Event</div>
-            <div class="text-sm font-medium text-gray-800 truncate">
-                {% if events %}
-                {{ events[0].type if events[0] else 'N/A' }}
-                {% else %}
-                No events
-                {% endif %}
-            </div>
         </div>
     </div>
 
@@ -173,7 +245,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
                 <div class="text-sm text-gray-500">Symbol</div>
-                <div class="font-medium">{{ config.symbol or 'N/A' }}</div>
+                <div class="font-medium text-lg">{{ config.symbol or 'N/A' }}</div>
             </div>
             <div>
                 <div class="text-sm text-gray-500">Currency</div>
@@ -207,34 +279,6 @@
     </div>
     {% endif %}
 
-    <!-- Event Types & Categories -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {% if event_types %}
-        <div class="bg-white rounded-lg shadow p-6">
-            <h4 class="text-sm font-medium text-gray-700 mb-3">Event Types</h4>
-            <div class="flex flex-wrap gap-2">
-                {% for type, count in event_types.items()|sort(attribute='1', reverse=True) %}
-                <span class="badge bg-blue-50 text-blue-700">
-                    {{ type }}: {{ count }}
-                </span>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-        {% if categories %}
-        <div class="bg-white rounded-lg shadow p-6">
-            <h4 class="text-sm font-medium text-gray-700 mb-3">Categories</h4>
-            <div class="flex flex-wrap gap-2">
-                {% for category, count in categories.items()|sort(attribute='1', reverse=True) %}
-                <span class="badge bg-purple-50 text-purple-700">
-                    {{ category }}: {{ count }}
-                </span>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-    </div>
-
     <!-- Live Event Stream -->
     <div class="bg-white rounded-lg shadow">
         <div class="px-6 py-4 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2">
@@ -253,22 +297,119 @@
         </div>
         <div id="event-stream" class="divide-y divide-gray-100">
             {% for event in events %}
-            <div class="event-item px-6 py-3" data-event-id="{{ loop.index }}">
+            <div class="event-item px-6 py-4 {% if event.type == 'trade_recorded' and event.data.result == 'WON' %}trade-won{% elif event.type == 'trade_recorded' and event.data.result == 'LOST' %}trade-lost{% elif event.type == 'market_tick_analysis' %}market{% elif event.type == 'system_heartbeat' %}system{% elif 'martingale' in event.type %}martingale{% elif 'stats' in event.type %}stats{% elif 'connection' in event.type %}connection{% endif %}" data-event-id="{{ loop.index }}">
                 <div class="flex items-start justify-between">
                     <div class="flex items-start space-x-3 flex-1 min-w-0">
-                        <i class="fas {{ event.type|getEventIcon }} text-{{ event.type|getEventColor }}-500 mt-1"></i>
+                        <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-gray-100">
+                            <i class="fas {{ event.type|getEventIcon }} text-{{ event.type|getEventColor }}-500"></i>
+                        </div>
                         <div class="flex-1 min-w-0">
                             <div class="flex flex-wrap items-center gap-2">
-                                <span class="font-mono text-sm font-medium text-gray-800">{{ event.type }}</span>
-                                <span class="badge bg-gray-100 text-gray-600">
+                                <span class="font-mono text-sm font-bold text-gray-800">{{ event.type|replace('_', ' ')|title }}</span>
+                                <span class="badge {{ event.type|getEventBadge }}">
                                     {{ event.display.category if event.display else event.data.category or 'unknown' }}
                                 </span>
+                                {% if event.type == 'trade_recorded' %}
+                                <span class="badge {{ event.data.result|getTradeResultBadge }}">
+                                    <i class="fas {% if event.data.result == 'WON' %}fa-check-circle{% else %}fa-times-circle{% endif %}"></i>
+                                    {{ event.data.result }}
+                                </span>
+                                {% endif %}
+                                {% if event.type == 'trade_executed' %}
+                                <span class="badge bg-blue-100 text-blue-800">
+                                    <i class="fas fa-arrow-{% if event.data.signal == 'CALL' %}up{% else %}down{% endif %}"></i>
+                                    {{ event.data.signal }}
+                                </span>
+                                {% endif %}
                             </div>
-                            <div class="text-sm text-gray-600 mt-1 truncate">
-                                {{ event.display.message if event.display else event.data.message or '' }}
+                            
+                            <!-- Event-specific widgets -->
+                            {% if event.type == 'trade_recorded' %}
+                            <div class="trade-detail mt-2">
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                                    <div>
+                                        <span class="text-gray-500">Trade #</span>
+                                        <span class="font-medium">{{ event.data.data.trade_number }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Signal</span>
+                                        <span class="font-medium {% if event.data.signal == 'CALL' %}text-green-600{% else %}text-red-600{% endif %}">
+                                            {{ event.data.signal }}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Stake</span>
+                                        <span class="font-medium">{{ event.data.stake }} {{ config.currency or 'USD' }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Profit</span>
+                                        <span class="font-bold pl-value {% if event.data.profit > 0 %}positive{% elif event.data.profit < 0 %}negative{% endif %}">
+                                            {% if event.data.profit > 0 %}+{% endif %}{{ "%.2f"|format(event.data.profit) }}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Entry</span>
+                                        <span class="font-medium">{{ "%.2f"|format(event.data.entry_price) }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Exit</span>
+                                        <span class="font-medium">{{ "%.2f"|format(event.data.exit_price) }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Balance</span>
+                                        <span class="font-medium">{{ "%.2f"|format(event.data.balance_after) }}</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="text-xs text-gray-400 mt-1">
-                                {{ event.timestamp|formatTimestamp }}
+                            {% elif event.type == 'trade_executed' %}
+                            <div class="mt-2 flex flex-wrap gap-4 text-sm bg-blue-50 p-2 rounded">
+                                <span><span class="text-gray-500">Signal:</span> <strong class="{% if event.data.signal == 'CALL' %}text-green-600{% else %}text-red-600{% endif %}">{{ event.data.signal }}</strong></span>
+                                <span><span class="text-gray-500">Stake:</span> <strong>{{ event.data.stake }}</strong></span>
+                                <span><span class="text-gray-500">Entry:</span> <strong>{{ "%.2f"|format(event.data.entry_price) }}</strong></span>
+                                <span><span class="text-gray-500">Trade ID:</span> <strong>{{ event.data.trade_id }}</strong></span>
+                            </div>
+                            {% elif event.type == 'market_tick_analysis' %}
+                            <div class="mt-2 flex flex-wrap gap-4 text-sm bg-indigo-50 p-2 rounded">
+                                <span><span class="text-gray-500">Price:</span> <strong>{{ "%.2f"|format(event.data.price) }}</strong></span>
+                                <span><span class="text-gray-500">Streak:</span> <strong class="{{ event.data.streak|getStreakColor }}">{{ event.data.streak }}</strong></span>
+                                <span><span class="text-gray-500">Stake:</span> <strong>{{ event.data.data.stake }}</strong></span>
+                                <span><span class="text-gray-500">Latency:</span> <strong>{{ event.data.latency_ms }}ms</strong></span>
+                            </div>
+                            {% elif event.type == 'stats_updated' %}
+                            <div class="mt-2 flex flex-wrap gap-4 text-sm bg-purple-50 p-2 rounded">
+                                <span><span class="text-gray-500">Trades:</span> <strong>{{ event.data.data.total_trades }}</strong></span>
+                                <span><span class="text-gray-500">Wins:</span> <strong class="text-green-600">{{ event.data.data.wins }}</strong></span>
+                                <span><span class="text-gray-500">Losses:</span> <strong class="text-red-600">{{ event.data.data.losses }}</strong></span>
+                                <span><span class="text-gray-500">Win Rate:</span> <strong>{{ "%.1f"|format(event.data.data.win_rate) }}%</strong></span>
+                                <span><span class="text-gray-500">Net P/L:</span> <strong class="pl-value {% if event.data.data.net_pl > 0 %}positive{% elif event.data.data.net_pl < 0 %}negative{% endif %}">
+                                    {% if event.data.data.net_pl > 0 %}+{% endif %}{{ "%.2f"|format(event.data.data.net_pl) }}
+                                </strong></span>
+                            </div>
+                            {% elif 'martingale' in event.type %}
+                            <div class="mt-2 flex flex-wrap gap-4 text-sm bg-pink-50 p-2 rounded">
+                                <span><span class="text-gray-500">Step:</span> <strong>{{ event.data.data.step }}/{{ event.data.data.max_steps }}</strong></span>
+                                <span><span class="text-gray-500">Stake:</span> <strong>{{ event.data.data.stake }}</strong></span>
+                                {% if event.data.data.loss_streak %}
+                                <span><span class="text-gray-500">Loss Streak:</span> <strong>{{ event.data.data.loss_streak }}</strong></span>
+                                {% endif %}
+                                {% if event.data.data.remaining_steps %}
+                                <span><span class="text-gray-500">Remaining:</span> <strong>{{ event.data.data.remaining_steps }}</strong></span>
+                                {% endif %}
+                            </div>
+                            {% elif event.type == 'trade_streak_confirmed' %}
+                            <div class="mt-2 flex flex-wrap gap-4 text-sm bg-yellow-50 p-2 rounded">
+                                <span><span class="text-gray-500">Signal:</span> <strong class="{% if event.data.signal == 'CALL' %}text-green-600{% else %}text-red-600{% endif %}">{{ event.data.signal }}</strong></span>
+                                <span><span class="text-gray-500">Entry:</span> <strong>{{ "%.2f"|format(event.data.entry_price) }}</strong></span>
+                                <span><span class="text-gray-500">Target Streak:</span> <strong>{{ event.data.target_streak }}</strong></span>
+                            </div>
+                            {% elif event.type == 'system_heartbeat' %}
+                            <div class="mt-2 text-xs text-gray-400">
+                                Heartbeat #{{ event.data.data.heartbeat_count }}
+                            </div>
+                            {% endif %}
+                            
+                            <div class="text-xs text-gray-400 mt-2">
+                                <i class="far fa-clock mr-1"></i> {{ event.timestamp|formatTimestamp }}
                             </div>
                         </div>
                     </div>
@@ -279,7 +420,7 @@
                     {% endif %}
                 </div>
                 {% if event.data %}
-                <div class="event-details hidden mt-2 pl-8">
+                <div class="event-details hidden mt-2 pl-14">
                     <pre class="bg-gray-50 p-3 rounded text-xs overflow-x-auto max-h-48">{{ event.data|tojson(indent=2) }}</pre>
                 </div>
                 {% endif %}
@@ -320,10 +461,36 @@
     let autoScroll = true;
     const workerId = '{{ worker_id }}';
     const stream = document.getElementById('event-stream');
+    let currentPl = {{ current_pl }};
+    let currentBalance = {{ current_balance }};
+    let currentWinRate = {{ win_rate }};
+    let currentTotalTrades = {{ total_trades }};
+    let isRunning = {{ is_running|lower }};
     
     function addEventToStream(event) {
         const eventDiv = document.createElement('div');
-        eventDiv.className = 'event-item new px-6 py-3';
+        let className = 'event-item new px-6 py-4';
+        
+        // Add specific classes based on event type
+        if (event.type === 'trade_recorded') {
+            if (event.data.result === 'WON') {
+                className += ' trade-won';
+            } else if (event.data.result === 'LOST') {
+                className += ' trade-lost';
+            }
+        } else if (event.type === 'market_tick_analysis') {
+            className += ' market';
+        } else if (event.type === 'system_heartbeat') {
+            className += ' system';
+        } else if (event.type.includes('martingale')) {
+            className += ' martingale';
+        } else if (event.type.includes('stats')) {
+            className += ' stats';
+        } else if (event.type.includes('connection')) {
+            className += ' connection';
+        }
+        
+        eventDiv.className = className;
         eventDiv.dataset.eventId = Date.now();
         
         const icon = event.display?.icon || getEventIconClient(event.type);
@@ -332,22 +499,103 @@
         const message = event.display?.message || event.data?.message || '';
         const timestamp = formatTimestampClient(event.timestamp);
         
+        let widgetHtml = '';
+        
+        // Build event-specific widgets
+        if (event.type === 'trade_recorded') {
+            const profit = event.data.profit || 0;
+            const profitClass = profit > 0 ? 'positive' : (profit < 0 ? 'negative' : '');
+            widgetHtml = `
+                <div class="trade-detail mt-2">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                        <div><span class="text-gray-500">Trade #</span> <span class="font-medium">${event.data.data?.trade_number || 'N/A'}</span></div>
+                        <div><span class="text-gray-500">Signal</span> <span class="font-medium ${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</span></div>
+                        <div><span class="text-gray-500">Stake</span> <span class="font-medium">${event.data.stake}</span></div>
+                        <div><span class="text-gray-500">Profit</span> <span class="font-bold pl-value ${profitClass}">${profit > 0 ? '+' : ''}${profit.toFixed(2)}</span></div>
+                    </div>
+                </div>
+            `;
+        } else if (event.type === 'trade_executed') {
+            widgetHtml = `
+                <div class="mt-2 flex flex-wrap gap-4 text-sm bg-blue-50 p-2 rounded">
+                    <span><span class="text-gray-500">Signal:</span> <strong class="${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</strong></span>
+                    <span><span class="text-gray-500">Stake:</span> <strong>${event.data.stake}</strong></span>
+                    <span><span class="text-gray-500">Entry:</span> <strong>${event.data.entry_price?.toFixed(2)}</strong></span>
+                    <span><span class="text-gray-500">Trade ID:</span> <strong>${event.data.trade_id}</strong></span>
+                </div>
+            `;
+        } else if (event.type === 'market_tick_analysis') {
+            const streak = event.data.streak || 0;
+            const streakClass = streak > 0 ? 'text-green-600' : (streak < 0 ? 'text-red-600' : '');
+            widgetHtml = `
+                <div class="mt-2 flex flex-wrap gap-4 text-sm bg-indigo-50 p-2 rounded">
+                    <span><span class="text-gray-500">Price:</span> <strong>${event.data.price?.toFixed(2)}</strong></span>
+                    <span><span class="text-gray-500">Streak:</span> <strong class="${streakClass}">${streak}</strong></span>
+                    <span><span class="text-gray-500">Stake:</span> <strong>${event.data.data?.stake}</strong></span>
+                    <span><span class="text-gray-500">Latency:</span> <strong>${event.data.latency_ms}ms</strong></span>
+                </div>
+            `;
+        } else if (event.type === 'stats_updated') {
+            const netPl = event.data.data?.net_pl || 0;
+            const plClass = netPl > 0 ? 'positive' : (netPl < 0 ? 'negative' : '');
+            widgetHtml = `
+                <div class="mt-2 flex flex-wrap gap-4 text-sm bg-purple-50 p-2 rounded">
+                    <span><span class="text-gray-500">Trades:</span> <strong>${event.data.data?.total_trades}</strong></span>
+                    <span><span class="text-gray-500">Wins:</span> <strong class="text-green-600">${event.data.data?.wins}</strong></span>
+                    <span><span class="text-gray-500">Losses:</span> <strong class="text-red-600">${event.data.data?.losses}</strong></span>
+                    <span><span class="text-gray-500">Win Rate:</span> <strong>${event.data.data?.win_rate?.toFixed(1)}%</strong></span>
+                    <span><span class="text-gray-500">Net P/L:</span> <strong class="pl-value ${plClass}">${netPl > 0 ? '+' : ''}${netPl.toFixed(2)}</strong></span>
+                </div>
+            `;
+        } else if (event.type.includes('martingale')) {
+            const step = event.data.data?.step || 0;
+            const maxSteps = event.data.data?.max_steps || 0;
+            widgetHtml = `
+                <div class="mt-2 flex flex-wrap gap-4 text-sm bg-pink-50 p-2 rounded">
+                    <span><span class="text-gray-500">Step:</span> <strong>${step}/${maxSteps}</strong></span>
+                    <span><span class="text-gray-500">Stake:</span> <strong>${event.data.data?.stake}</strong></span>
+                    ${event.data.data?.loss_streak ? `<span><span class="text-gray-500">Loss Streak:</span> <strong>${event.data.data.loss_streak}</strong></span>` : ''}
+                    ${event.data.data?.remaining_steps ? `<span><span class="text-gray-500">Remaining:</span> <strong>${event.data.data.remaining_steps}</strong></span>` : ''}
+                </div>
+            `;
+        } else if (event.type === 'trade_streak_confirmed') {
+            widgetHtml = `
+                <div class="mt-2 flex flex-wrap gap-4 text-sm bg-yellow-50 p-2 rounded">
+                    <span><span class="text-gray-500">Signal:</span> <strong class="${event.data.signal === 'CALL' ? 'text-green-600' : 'text-red-600'}">${event.data.signal}</strong></span>
+                    <span><span class="text-gray-500">Entry:</span> <strong>${event.data.entry_price?.toFixed(2)}</strong></span>
+                    <span><span class="text-gray-500">Target Streak:</span> <strong>${event.data.target_streak}</strong></span>
+                </div>
+            `;
+        } else if (event.type === 'system_heartbeat') {
+            widgetHtml = `
+                <div class="mt-2 text-xs text-gray-400">
+                    Heartbeat #${event.data.data?.heartbeat_count}
+                </div>
+            `;
+        }
+        
         eventDiv.innerHTML = `
             <div class="flex items-start justify-between">
                 <div class="flex items-start space-x-3 flex-1 min-w-0">
-                    <i class="fas ${icon} text-${color}-500 mt-1"></i>
+                    <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-gray-100">
+                        <i class="fas ${icon} text-${color}-500"></i>
+                    </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-mono text-sm font-medium text-gray-800">${event.type}</span>
+                            <span class="font-mono text-sm font-bold text-gray-800">${event.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
                             <span class="badge bg-gray-100 text-gray-600">${category}</span>
+                            ${event.type === 'trade_recorded' ? `<span class="badge ${event.data.result === 'WON' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}"><i class="fas ${event.data.result === 'WON' ? 'fa-check-circle' : 'fa-times-circle'}"></i> ${event.data.result}</span>` : ''}
+                            ${event.type === 'trade_executed' ? `<span class="badge bg-blue-100 text-blue-800"><i class="fas fa-arrow-${event.data.signal === 'CALL' ? 'up' : 'down'}"></i> ${event.data.signal}</span>` : ''}
                         </div>
-                        <div class="text-sm text-gray-600 mt-1 truncate">${truncateClient(message, 80)}</div>
-                        <div class="text-xs text-gray-400 mt-1">${timestamp}</div>
+                        ${widgetHtml}
+                        <div class="text-xs text-gray-400 mt-2">
+                            <i class="far fa-clock mr-1"></i> ${timestamp}
+                        </div>
                     </div>
                 </div>
                 ${event.data ? `<button onclick="toggleDetails(this)" class="ml-2 text-xs text-gray-400 hover:text-gray-600 flex-shrink-0"><i class="fas fa-chevron-down"></i></button>` : ''}
             </div>
-            ${event.data ? `<div class="event-details hidden mt-2 pl-8"><pre class="bg-gray-50 p-3 rounded text-xs overflow-x-auto max-h-48">${JSON.stringify(event.data, null, 2)}</pre></div>` : ''}
+            ${event.data ? `<div class="event-details hidden mt-2 pl-14"><pre class="bg-gray-50 p-3 rounded text-xs overflow-x-auto max-h-48">${JSON.stringify(event.data, null, 2)}</pre></div>` : ''}
         `;
         
         // Insert at top
@@ -363,10 +611,43 @@
         document.getElementById('event-count').textContent = `${eventCount} events`;
         document.getElementById('total-events').textContent = eventCount;
         
+        // Update P/L if available
+        if (event.type === 'stats_updated' && event.data?.data?.net_pl !== undefined) {
+            const pl = event.data.data.net_pl;
+            currentPl = pl;
+            updatePL(pl);
+        }
+        
+        // Update balance if available
+        if (event.type === 'stats_updated' && event.data?.data?.current_balance !== undefined) {
+            currentBalance = event.data.data.current_balance;
+            document.getElementById('current-balance').textContent = `${currentBalance.toFixed(2)} USD`;
+        }
+        
+        // Update win rate and trades if available
+        if (event.type === 'stats_updated' && event.data?.data) {
+            const data = event.data.data;
+            if (data.win_rate !== undefined) {
+                currentWinRate = data.win_rate;
+                document.getElementById('win-rate').textContent = `${data.win_rate.toFixed(1)}%`;
+            }
+            if (data.total_trades !== undefined) {
+                currentTotalTrades = data.total_trades;
+                document.getElementById('total-trades').textContent = `${data.total_trades} total trades`;
+            }
+        }
+        
         // Auto-scroll to top if enabled
         if (autoScroll) {
             stream.scrollTop = 0;
         }
+    }
+    
+    function updatePL(pl) {
+        const plElement = document.getElementById('current-pl');
+        const sign = pl > 0 ? '+' : '';
+        plElement.textContent = `${sign}${pl.toFixed(2)} USD`;
+        plElement.className = `text-2xl font-bold pl-value ${pl > 0 ? 'positive' : (pl < 0 ? 'negative' : '')}`;
     }
     
     function toggleDetails(button) {
@@ -395,6 +676,87 @@
             btn.innerHTML = '<i class="fas fa-pause"></i> Paused';
             btn.className = 'text-sm text-blue-600 hover:text-blue-700 transition-colors';
         }
+    }
+    
+    // Stop worker function
+    async function stopWorker() {
+        if (!confirm(`Are you sure you want to stop worker ${workerId}?`)) {
+            return;
+        }
+        
+        const btn = document.getElementById('stop-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Stopping...';
+        btn.className = 'stop-btn px-4 py-2 bg-gray-400 text-white text-sm font-medium rounded-md cursor-not-allowed';
+        
+        try {
+            const response = await fetch(`/workers/${workerId}/stop`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                // Update UI
+                isRunning = false;
+                const statusBadge = document.getElementById('worker-status');
+                statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800';
+                statusBadge.innerHTML = '<i class="fas fa-circle text-red-500 text-xs mr-1"></i> Stopped';
+                
+                btn.innerHTML = '<i class="fas fa-check mr-1"></i> Stopped';
+                btn.className = 'stop-btn px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md cursor-default';
+                btn.disabled = true;
+                
+                // Show success notification
+                showNotification('success', `Worker ${data.worker_id} stopped successfully`);
+            } else {
+                throw new Error(data.message || 'Failed to stop worker');
+            }
+        } catch (error) {
+            console.error('Error stopping worker:', error);
+            btn.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Error';
+            btn.className = 'stop-btn px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md';
+            btn.disabled = false;
+            
+            showNotification('error', `Failed to stop worker: ${error.message}`);
+        }
+    }
+    
+    // Show notification
+    function showNotification(type, message) {
+        const notification = document.createElement('div');
+        const colors = {
+            success: 'bg-green-100 border-green-400 text-green-700',
+            error: 'bg-red-100 border-red-400 text-red-700',
+            info: 'bg-blue-100 border-blue-400 text-blue-700'
+        };
+        
+        notification.className = `fixed top-4 right-4 z-50 px-6 py-4 rounded-lg border shadow-lg ${colors[type] || colors.info} max-w-md`;
+        notification.innerHTML = `
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'} mr-2"></i>
+                </div>
+                <div class="flex-1">
+                    <p class="text-sm font-medium">${message}</p>
+                </div>
+                <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 5000);
     }
     
     // WebSocket connection
@@ -426,7 +788,18 @@
             } else if (data.type === 'status_update') {
                 // Update status
                 const status = data.is_running ? 'Running' : 'Stopped';
+                isRunning = data.is_running;
                 console.log(`Worker status updated: ${status}`);
+                
+                // Update status badge
+                const statusBadge = document.getElementById('worker-status');
+                if (data.is_running) {
+                    statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800';
+                    statusBadge.innerHTML = '<i class="fas fa-circle text-green-500 text-xs mr-1"></i> Running';
+                } else {
+                    statusBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800';
+                    statusBadge.innerHTML = '<i class="fas fa-circle text-red-500 text-xs mr-1"></i> Stopped';
+                }
             }
         };
         
