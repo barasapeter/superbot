@@ -636,7 +636,7 @@ class SessionStats:
 
 class MartingaleManager:
     def __init__(
-        self, base_stake, multiplier=2.0, enabled=True, max_steps=6, max_stake=5000
+        self, base_stake, multiplier=2.0, enabled=True, max_steps=6, max_stake=5000, stats=None
     ):
         self.base_stake = base_stake
         self.multiplier = multiplier
@@ -652,6 +652,7 @@ class MartingaleManager:
         self._stopped = False
         self.logger = None
         self.event_manager = None
+        self.stats = stats
 
     def set_logger(self, logger):
         self.logger = logger
@@ -775,6 +776,29 @@ class MartingaleManager:
                 self._pending_stake = None
                 self._is_prefetched = False
                 self._stopped = False
+
+                if self.stats.net_pl < 0:
+                    self.current_stake = round(self.base_stake * 1.75, 2)
+                    if self.logger:
+                        self.logger.info(
+                            f"{C.YELLOW}🔁 Martingale reset UNDONE{C.RESET} — Net PL is {self.stats.net_pl} {currency}, "
+                            f"To recover, martingale is up 175% from base stake = ({C.BOLD}{self.base_stake} {currency}{C.RESET})."
+                        )
+                    if self.event_manager:
+                        await self.event_manager.martingale_event(
+                            "reset",
+                            EventLevel.WARNING,
+                            "Martingale reset UNDONE!",
+                            title="Martingale reset UNDONE",
+                            description=f"Martingale reset undone to 175% up from base stake, net PL is below zero. PL: {self.stats.net_pl} {currency}",
+                            data={
+                                "base_stake": self.base_stake,
+                                "currency": currency,
+                                "previous_step": self.step,
+                                "loss_streak": self.loss_streak,
+                            },
+                        )
+
                 return
 
             self._pending_stake = None
@@ -1944,6 +1968,7 @@ async def run_worker(config, logger=None, worker_id=None):
             enabled=martingale_enabled,
             max_steps=max_martingale_steps,
             max_stake=max_stake,
+            stats=stats
         )
         martingale.set_logger(logger)
         martingale.set_event_manager(event_manager)
